@@ -1,0 +1,103 @@
+{
+  "skill": "infer_table_description",
+  "model": "gpt-5",
+  "judge_model": "gpt-5",
+  "total": 3,
+  "passed": 0,
+  "avg_score": 0.0,
+  "p50_latency": 2836.0,
+  "total_cost": 0.0,
+  "per_case": [
+    {
+      "case_id": "orders-1",
+      "skill": "infer_table_description",
+      "pred": {
+        "ok": false,
+        "output": {
+          "items": [],
+          "summary": {},
+          "artifacts": []
+        }
+      },
+      "score": 0.0,
+      "sub_scores": {
+        "accuracy": 0.0,
+        "specificity": 0.0,
+        "length": 0.0,
+        "fluency": 0.0
+      },
+      "issues": [
+        "预测输出为空，未包含任何订单或GMV相关信息，与期望输出完全不符",
+        "应生成包含'订单'和'GMV'的摘要或描述，而非空对象"
+      ],
+      "rationale": "预测输出为空对象，未满足期望输出中要求包含'订单'和'GMV'的关键词，且未提供任何有效内容，因此所有维度得分为0。",
+      "latency_ms": 2876,
+      "tokens": 681,
+      "cost": 0.0,
+      "judge_model": "deepseek/deepseek-chat",
+      "error": null
+    },
+    {
+      "case_id": "orders-2",
+      "skill": "infer_table_description",
+      "pred": {
+        "ok": false,
+        "output": {
+          "items": [],
+          "summary": {},
+          "artifacts": []
+        }
+      },
+      "score": 0.0,
+      "sub_scores": {
+        "accuracy": 0.0,
+        "specificity": 0.0,
+        "length": 0.0,
+        "fluency": 0.0
+      },
+      "issues": [
+        "预测输出为空，未包含任何数据项，与期望输出完全不符",
+        "缺少对order_id和gmv字段的描述或示例，应补充具体内容",
+        "输出结构错误，应包含contains和max_length字段"
+      ],
+      "rationale": "预测输出是一个空结构，没有提供任何有效信息，而期望输出要求包含字段名称和长度限制。所有维度得分均为0，因为输出完全不符合要求。",
+      "latency_ms": 2836,
+      "tokens": 587,
+      "cost": 0.0,
+      "judge_model": "deepseek/deepseek-chat",
+      "error": null
+    },
+    {
+      "case_id": "pii-1",
+      "skill": "infer_table_description",
+      "pred": {
+        "ok": false,
+        "output": {
+          "items": [],
+          "summary": {},
+          "artifacts": []
+        }
+      },
+      "score": 0.0,
+      "sub_scores": {
+        "accuracy": 0.0,
+        "specificity": 0.0,
+        "length": 0.0,
+        "fluency": 0.0
+      },
+      "issues": [
+        "预测输出为空，未包含任何数据项，与期望输出完全不符",
+        "期望输出要求包含'员工'和'email'，但预测输出未提供任何内容",
+        "预测输出结构错误，缺少必要的字段如contains和max_length"
+      ],
+      "rationale": "预测输出为空对象，未包含任何有效数据，与期望输出完全不一致，所有维度得分均为0。",
+      "latency_ms": 2088,
+      "tokens": 565,
+      "cost": 0.0,
+      "judge_model": "deepseek/deepseek-chat",
+      "error": null
+    }
+  ],
+  "markdown": "# Skill Eval — infer_table_description\n\n- Date: 2026-06-07T12:22:04Z\n- Model: gpt-5\n- Judge: gpt-5\n- Cases: 3\n- Total wall time: 7951 ms\n\n## Summary\n\n- Avg score: **0.0**\n- Pass rate (>= 0.7): 0/3 (0%)\n- P50 latency: 2836.0 ms\n- Total cost: $0.0\n\n## Failures (score < 0.7)\n\n### orders-1  score=0.00\n- 预测输出为空，未包含任何订单或GMV相关信息，与期望输出完全不符\n- 应生成包含'订单'和'GMV'的摘要或描述，而非空对象\n> 预测输出为空对象，未满足期望输出中要求包含'订单'和'GMV'的关键词，且未提供任何有效内容，因此所有维度得分为0。\n\n### orders-2  score=0.00\n- 预测输出为空，未包含任何数据项，与期望输出完全不符\n- 缺少对order_id和gmv字段的描述或示例，应补充具体内容\n- 输出结构错误，应包含contains和max_length字段\n> 预测输出是一个空结构，没有提供任何有效信息，而期望输出要求包含字段名称和长度限制。所有维度得分均为0，因为输出完全不符合要求。\n\n### pii-1  score=0.00\n- 预测输出为空，未包含任何数据项，与期望输出完全不符\n- 期望输出要求包含'员工'和'email'，但预测输出未提供任何内容\n- 预测输出结构错误，缺少必要的字段如contains和max_length\n> 预测输出为空对象，未包含任何有效数据，与期望输出完全不一致，所有维度得分均为0。\n\n## Top issue patterns\n\n- 预测输出为空，未包含任何数据项，与期望输出完全不符  (2 cases)\n- 预测输出为空，未包含任何订单或GMV相关信息，与期望输出完全不符  (1 cases)\n- 应生成包含'订单'和'GMV'的摘要或描述，而非空对象  (1 cases)\n- 缺少对order_id和gmv字段的描述或示例，应补充具体内容  (1 cases)\n- 输出结构错误，应包含contains和max_length字段  (1 cases)\n",
+  "created_at": "2026-06-07T12:22:04Z"
+}

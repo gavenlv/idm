@@ -1,4 +1,4 @@
-# IDM — 迭代路线图与里程碑
+﻿# IDM — 迭代路线图与里程碑
 
 > 从 0 到 1，5 个季度交付一个**生产可用**的 AI 驱动数据管理平台
 > 节奏：**季度 1 个大版本**，**月度小迭代**
@@ -87,7 +87,7 @@ gantt
 
 | 能力 | 交付 |
 | --- | --- |
-| LLM 基础设施 | LangGraph + LiteLLM + **GPT-5/DeepSeek/Qwen 经统一网关** |
+| LLM 基础设施 | LangGraph + LiteLLM + **GPT-5/DeepSeek/deepseek-v4 经统一网关** |
 | Doc Generator | 自动化生成 + 人工审核流 |
 | Glossary Mapper | 列名 → 业务术语 |
 | Owner Recommender | 综合信号推断 |

@@ -1,4 +1,4 @@
-# IDM — MCP-First / 声明式 / Zero-Touch 架构
+﻿# IDM — MCP-First / 声明式 / Zero-Touch 架构
 
 > **核心理念 (再升级)**
 > IDM 不部署 Sidecar、不要求任何系统改造、不嵌入业务路径
@@ -544,7 +544,7 @@ flowchart LR
 | **Flink** | 数据源 (MCP Server) | **0 改动**（起一个 REST MCP wrapper） |
 | **Superset** | 数据源 (export 解析) | **0 改动**（用户从 UI 导出 JSON 即可） |
 | **GitHub** | 数据源 (官方 MCP) | **0 改动** |
-| **GPT-5 / DeepSeek V3 / 本地 Qwen2.5** | LLM 推理 (LiteLLM 网关统一) | 新建 |
+| **DeepSeek V4 / GPT-5** | LLM 推理 (LiteLLM 网关统一; 仅 2 个生产模型) | 新建 |
 
 > IDM 真正意义上是 **「外挂在企业数据栈旁边的智能层」**。
 
@@ -573,7 +573,7 @@ idm/use_cases/
 | 主配置 | **YAML** | 人可读 + LLM 可读 + GitOps 友好 |
 | Agent 框架 | **LangGraph + LiteLLM** | 成熟 + 可观测 |
 | 知识存储 | **PG + AGE + pgvector** | 单栈统一 |
-| LLM | **GPT-5 主力 + DeepSeek V3 备选 + Qwen2.5 本地兜底** (经 LiteLLM) | 质量 / 成本 / 合规三角平衡 |
+| LLM | **DeepSeek V4 主力 + GPT-5 备选** (经 LiteLLM; 仅 2 个生产模型; PII 一律先 mask 再送) | 质量 / 成本 三角平衡 |
 | 推送 | **Slack 优先 + Lark 后续** | 国内使用率高 |
 
 ---

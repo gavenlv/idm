@@ -1,9 +1,9 @@
-# IDM — 端到端 Walkthrough
+﻿# IDM — 端到端 Walkthrough
 
 > 📌 **实现前先读**: [AGENT_INSTRUCTIONS.md](../AGENT_INSTRUCTIONS.md) §8 (Use Case YAML) + §3 (1+9 Agent) — 跑这个 demo 前先看。
 
 > 一个真实业务 use case, 从 YAML 提交到产出 Insight 的全流程
-> 演示: **MCP 调用 + Skills 执行 + GPT-5/DeepSeek 决策 + 知识图谱 + Web 反馈**
+> 演示: **MCP 调用 + Skills 执行 + DeepSeek V4 决策 + GPT-5 备选 + 知识图谱 + Web 反馈**
 
 ---
 
@@ -505,7 +505,7 @@ async def daily_run(uc_id):
 sequenceDiagram
     participant SR as Skill Runner
     participant CH as ClickHouse
-    participant LLM as DeepSeek V3
+    participant LLM as DeepSeek V4
 
     SR->>CH: SELECT count, sum(gmv) FROM shop.orders_daily WHERE order_date >= today() - 30 GROUP BY date
     CH-->>SR: 30 天画像
@@ -631,7 +631,7 @@ shop-orders-daily v1
 ├─ infer_table_description      ✓  6.2s   (LLM gpt-5, $0.08)
 ├─ classify_pii_columns         ✓  3.1s   (LLM gpt-5, $0.03)
 ├─ infer_owners                 ✓  1.4s   (LLM gpt-5, $0.01)
-└─ compose_insight              ✓  0.9s   (LLM deepseek-v3, $0.001)
+└─ compose_insight              ✓  0.9s   (LLM deepseek-v4, $0.001)
                               ─────
                               Total: 27.4s, $0.12
 ```
@@ -650,8 +650,8 @@ sequenceDiagram
     participant CH as ClickHouse MCP
     participant FS as File MCP (Superset Export)
     participant GM as GitHub MCP
-    participant L1 as GPT-5
-    participant L2 as DeepSeek V3
+    participant L1 as DeepSeek V4
+    participant L2 as GPT-5
     participant KG as Knowledge Graph
     participant SL as Slack
 

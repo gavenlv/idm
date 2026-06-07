@@ -1,4 +1,4 @@
-# IDM — Agent Instructions (核心单一文件)
+﻿# IDM — Agent Instructions (核心单一文件)
 
 > **目的**：把 IDM (Intelligent Data Mesh) 平台**最核心、最不可违反**的设计决策
 > 汇总到 **一个文件**，以便后续任何实现（自己 / 同事 / 下游 Agent / 半年后回看）
@@ -30,7 +30,7 @@
 > **绝对禁止**：
 > - ❌ 让 LLM 直接调 MCP tool (必须经 Skill)
 > - ❌ 让 LLM 自动 `INSERT / UPDATE / DELETE` ClickHouse / Postgres (只读账号 + SQL Guard)
-> - ❌ 把业务 PII 送到云端 LLM (默认走本地 Qwen, 或 mask 后再送)
+> - ❌ 把业务 PII 不经 mask 送到 LLM (PII 列必须先 mask, 默认走 deepseek-v4)
 > - ❌ 写新的 Connector 而不自建 MCP Server
 > - ❌ 跳过 `ai_suggestion` 审核流, 直接写入知识图谱
 
@@ -68,14 +68,14 @@ flowchart LR
 
 ## 3. 1+9 Agent 模型
 
-### 3.1 Planner (gpt-5)
+### 3.1 Planner (deepseek-v4)
 
 ```python
 async def plan(use_case: dict) -> PlanResponse:
     snap = await load_snapshot(use_case["id"])
     diff = await compute_diff(use_case, snap)
     resp = await llm.complete(
-        model="gpt-5",
+        model="deepseek-v4",
         messages=[{"role":"system","content":PLANNER_SYS},
                   {"role":"user","content":build_prompt(use_case, snap, diff)}],
         output_type="json", schema=PlanResponse.model_json_schema(),
@@ -91,15 +91,15 @@ async def plan(use_case: dict) -> PlanResponse:
 
 | # | Agent | 输入 | 输出 (写入 KG) | 主 LLM | Skill |
 | --- | --- | --- | --- | --- | --- |
-| 1 | **Schema** | MCP (CH/PG/Trino) | `Table`, `Column`, `Database` | deepseek-v3 | `discover_*_assets` |
-| 2 | **Lineage** | dbt manifest / AF DAG / Superset export / SQL | `UPSTREAM/DOWNSTREAM` 边 | deepseek-v3 + sqlglot | `parse_*`, `extract_sql_lineage` |
-| 3 | **Doc** | schema + sample + glossary | `description`, `glossary_binding` | gpt-5 | `infer_table_description` |
-| 4 | **PII** | column meta + sample + regex | `pii_class`, `masking_policy` | gpt-5 | `classify_pii_columns` |
-| 5 | **Owner** | git blame + dbt meta + AF owner + query log | `owner`, `steward`, `consumer` | gpt-5 | `infer_owners` |
-| 6 | **Quality** | 30 天画像 + LLM 推理 | `anomaly_event`, `metric_baseline` | deepseek-reasoner (R1) | `detect_anomalies`, `run_quality_check` |
-| 7 | **Insight** | anomaly / 新资产 / 缺 owner 等 | `insight` + 渠道 push | gpt-5 | `compose_insight` |
-| 8 | **ChatBI** | 自然语言 + schema + 历史 | `sql` + `result` + `chart` | gpt-5 | `nl2sql` (5 层 SQL Guard) |
-| 9 | **Glossary** | schema + 列名 + 业务文档 | `glossary_term`, `term_binding` | gpt-5 | `map_glossary` |
+| 1 | **Schema** | MCP (CH/PG/Trino) | `Table`, `Column`, `Database` | deepseek-v4 | `discover_*_assets` |
+| 2 | **Lineage** | dbt manifest / AF DAG / Superset export / SQL | `UPSTREAM/DOWNSTREAM` 边 | deepseek-v4 + sqlglot | `parse_*`, `extract_sql_lineage` |
+| 3 | **Doc** | schema + sample + glossary | `description`, `glossary_binding` | deepseek-v4 | `infer_table_description` |
+| 4 | **PII** | column meta + sample + regex | `pii_class`, `masking_policy` | deepseek-v4 (PII 列 mask 后) | `classify_pii_columns` |
+| 5 | **Owner** | git blame + dbt meta + AF owner + query log | `owner`, `steward`, `consumer` | deepseek-v4 | `infer_owners` |
+| 6 | **Quality** | 30 天画像 + LLM 推理 | `anomaly_event`, `metric_baseline` | gpt-5 (复杂归因) | `detect_anomalies`, `run_quality_check` |
+| 7 | **Insight** | anomaly / 新资产 / 缺 owner 等 | `insight` + 渠道 push | deepseek-v4 | `compose_insight` |
+| 8 | **ChatBI** | 自然语言 + schema + 历史 | `sql` + `result` + `chart` | gpt-5 (NL2SQL 强推理) | `nl2sql` (5 层 SQL Guard) |
+| 9 | **Glossary** | schema + 列名 + 业务文档 | `glossary_term`, `term_binding` | deepseek-v4 | `map_glossary` |
 
 > **原则**: Planner 拆任务, 每个 Specialist 只做自己的领域, **不跨界调用**; 跨域数据全靠知识图谱。
 
@@ -231,16 +231,16 @@ if __name__ == "__main__":
 
 ## 6. LLM 路由 (质量 / 成本 / 合规三角)
 
+> **本版本仅支持 2 个生产模型**：DeepSeek V4（主力）+ GPT-5（备选）。
+> 历史模型（DeepSeek V3 / R1 / Qwen 本地）已下线，不再维护。
+
 ### 6.1 模型矩阵 (经 LiteLLM 统一)
 
-| 模型 | 部署 | 用途 | 单价 (1M tok) | 上下文 |
+| 模型 | 部署 | 角色 | 单价 (1M tok) | 上下文 |
 | --- | --- | --- | --- | --- |
-| **gpt-5** (主力) | OpenAI API | 规划 / 推理 / 文档 / NL2SQL | $3 in / $12 out | 128k |
-| **gpt-5.4** (可平滑升级) | OpenAI API | 同上, 升级路径 | 同档 | 128k |
-| **deepseek-v3** (备选) | DeepSeek API | 中文 / 长文 / 成本 | $0.14 / $0.28 | 64k |
-| **deepseek-v4-pro** (可平滑升级) | DeepSeek API | 同上, 升级路径 | 同档 | 64k |
-| **deepseek-reasoner (R1)** | DeepSeek API | 复杂归因 / 数学 | $0.55 / $2.19 | 64k |
-| **qwen2.5:32b** (本地) | Ollama on GKE | **合规 / 内网 / 兜底** | 0 (电费) | 32k |
+| **deepseek-v4** (主力) | DeepSeek API | **主力** — 中文 / 长文 / 文档 / 推断 / 批量 / 默认 | $0.14 in / $0.28 out | 64k |
+| **gpt-5** (备选) | OpenAI API | **备选** — 复杂推理 / 数学 / Code Review / NL2SQL 强推理 | $3 in / $12 out | 128k |
+| **gpt-5.4** (可平滑升级) | OpenAI API | 同 gpt-5 档，升级路径 | 同档 | 128k |
 | **text-embedding-3-large** | OpenAI API | Embedding 主 | $0.13 | 8k |
 | **bge-large-zh** | 本地 | Embedding 备 | 0 | 512 |
 
@@ -248,26 +248,29 @@ if __name__ == "__main__":
 
 ```python
 def pick_model(task: dict) -> str:
-    if task.get("contains_pii"):                return "qwen-local"        # 合规
-    if task.get("estimated_input_tokens", 0) > 60_000: return "deepseek-v3" # 长文
-    if task.get("requires_reasoning"):          return "gpt-5"             # 复杂
-    if task.get("language", "zh") in ("zh",):   return "deepseek-v3"       # 中文
-    return "gpt-5"
+    if task.get("contains_pii"):
+        return "deepseek-v4"   # PII 仍走 v4, 但先 mask (mask 在 client 层)
+    if task.get("estimated_input_tokens", 0) > 60_000:
+        return "deepseek-v4"   # 长文走 v4
+    if task.get("requires_reasoning"):
+        return "gpt-5"         # 复杂推理走 gpt-5
+    if task.get("language", "zh") in ("zh", "zh-CN"):
+        return "deepseek-v4"   # 中文走 v4
+    return "deepseek-v4"       # 默认走 v4
 ```
 
 ### 6.3 任务 → 默认模型 速查
 
 | 任务 | 默认 | 备选 |
 | --- | --- | --- |
-| Planner / 文档 / NL2SQL / Owner / PII | **gpt-5** | deepseek-v3 |
-| Schema 发现 / Lineage 解析 | **deepseek-v3** | gpt-5 |
-| 异常归因 | **deepseek-reasoner** | gpt-5 |
-| 敏感字段分析 | **qwen-local** | - |
-| 批量回填 (>5k) | **deepseek-v3** | qwen-local |
+| Planner / Schema / Lineage / Doc / Owner / Insight / Glossary / PII (mask) | **deepseek-v4** | gpt-5 |
+| 复杂归因 (Quality 异常根因) / NL2SQL (强推理) / Code Review (PR) | **gpt-5** | deepseek-v4 |
+| 批量回填 (>5k calls) | **deepseek-v4** | gpt-5 |
+| PII 列含敏感数据 | **deepseek-v4** (强制先 mask) | - |
 
 ### 6.4 不可逾越的护栏
 
-- **PII 数据 → 必走 qwen-local**; 云端调用前必 mask
+- **PII 数据 → 必走 deepseek-v4 (PII 先 mask)**; mask 在 client 层
 - **CH SQL → 只读账号 + SQL Guard (限 SELECT + 强制 LIMIT + 禁危险函数)**
 - **所有 LLM 调用 → Langfuse trace** (token / 延迟 / 成本 / 模型 / cache hit)
 - **任何写操作 → 进 `ai_suggestion.pending` → 人工确认后才落 KG**
@@ -427,7 +430,7 @@ flowchart TB
 | 认证 | Google Workspace SSO (OIDC) + Service Account (M2M) |
 | 授权 | RBAC + ABAC (基于 Tag / Domain) |
 | 租户 | 起步单租户; 模型预留 `tenant_id` |
-| LLM 安全 | **敏感数据脱敏 → LLM**; PII 强制走本地 Qwen; 审计 LLM 调用 |
+| LLM 安全 | **敏感数据脱敏 → LLM**; PII 强制走DeepSeek V4; 审计 LLM 调用 |
 | **SQL Guard (5 层)** | 1) 解析为 SELECT  2) 禁 DML 关键字  3) 禁危险函数  4) 强制 LIMIT  5) 只读账号 |
 | 审计 | 所有写操作 + LLM 调用 + MCP 调用 → `audit_log` |
 | 数据驻留 | 本地 LLM 兜底; 海外业务可指定 GPT-5 EU region |
@@ -490,7 +493,7 @@ flowchart LR
 | 008 | 部署平台 | GKE | 全部 IDM 在 GKE; ClickHouse 留 GCE |
 | 009 | Agent 框架 | **LangGraph + 自研 Specialist + Skill** | 关键 Agent 自研, 可控可审计 |
 | 010 | 稳定性 | **Spec + Runner + Validator + Eval Harness** | 避免 LLM 直调 |
-| 011 | LLM 模型 | **GPT-5 主力 + DeepSeek V3 备选 + Qwen 本地兜底** | 质量/成本/合规三角 |
+| 011 | LLM 模型 | **DeepSeek V4 主力 + GPT-5 备选** (2026-06 起仅 2 个生产模型) | 质量/成本三角 |
 | 012 | 业务配置 | **Use Case YAML** | 一份即声明场景 |
 | 013 | 评估 | **离线 Gold + 在线 Judge + 用户反馈** | 三层闭环 |
 | 014 | 数据格式 | Parquet + Iceberg on GCS | 大样本 / 长期归档 |
@@ -501,8 +504,8 @@ flowchart LR
 
 | 失败 | 应对 |
 | --- | --- |
-| LLM 不可用 | LiteLLM 自动 fallback: gpt-5 → deepseek-v3 → qwen-local |
-| PII 误送云端 | 强制 mask + 走 qwen-local + 审计 |
+| LLM 不可用 | LiteLLM 自动 fallback: deepseek-v4 → gpt-5 |
+| PII 误送云端 | 强制 mask + 走 deepseek-v4 + 审计 |
 | CH 大查询影响生产 | 只读账号 + SAMPLE + 时间窗 + 强制 LIMIT |
 | LLM 成本失控 | Context 预算 + Embedding Cache + 错峰批处理 + 月预算告警 |
 | 建议被持续拒绝 | Few-shot 强化 + 反馈回写 + Insight 价值外显 |
@@ -557,12 +560,12 @@ flowchart LR
 
 ## 18. 一句话总结
 
-> **IDM = 1 份 YAML + MCP 旁路 + 1+9 Agent + Skill SOP + GPT-5/DeepSeek/Qwen + ag-grid + 知识图谱 + 人工 in-the-loop**
+> **IDM = 1 份 YAML + MCP 旁路 + 1+9 Agent + Skill SOP + GPT-5/DeepSeek/deepseek-v4 + ag-grid + 知识图谱 + 人工 in-the-loop**
 > 业务 0 改动, 治理全自动。
 
 ---
 
-## 19. 已落地状态 (Build State — 截至 M1 S1.2, 2026-06-07)
+## 19. 已落地状态 (Build State — 截至 M1 S1.14, 2026-06-07)
 
 > **这一节是"实测"而非"设计"**: 列出现已跑通的功能 / 端点 / 文件,
 > 后续 Agent 拿到任务时, **先看这节判断是否需要从零造轮子**。
@@ -577,12 +580,21 @@ flowchart LR
 | **M1 S1.3** 前端 Skills 页面 (ag-grid 触发 / 结果展示) | ✅ | `verify_skills_page.py` 全绿 |
 | **M1 S1.4** 接入 DeepSeek (去 mock) + PII 推断 Skill + approve→KG 同步 | ✅ | `verify_deepseek.py` + `verify_pii.py` + `verify_approve_sync.py` 全绿 |
 | **M1 S1.5** Asset 详情 (列 + PII 摘要) + 建议审核 UI 升级 + dbt manifest Skill | ✅ | `verify_s1_5.py` 全绿 |
+| **M1 S1.6** Superset Dashboard 解析 Skill | ✅ | `verify_s1_6.py` 全绿 |
+| **M1 S1.7** Airflow DAG 解析 Skill | ✅ | `verify_s1_7.py` 全绿 |
+| **M1 S1.8** 真实 ClickHouse 端到端 (5 张表入 KG) | ✅ | `verify_s1_8.py` 全绿 |
+| **M1 S1.9** Owner 推断 Skill + 服务隔离 (FQN 前缀) | ✅ | `verify_s1_9.py` 全绿 |
+| **M1 S1.10** NL2SQL Skill (5 层 Guard) | ✅ | `verify_s1_10.py` 全绿 |
+| **M1 S1.11** 异常检测 Skill (volume / null / PII / owner) | ✅ | `verify_s1_11.py` 全绿 |
+| **M1 S1.12** Lineage 可视化 (react-flow BFS 布局) | ✅ | `verify_s1_12.py` 全绿 |
+| **M1 S1.13** 多源 Owner 融合 (dbt + git + LLM) | ✅ | 测试已纳入 |
+| **M1 S1.14** Eval Harness (Gold Snapshot + LLM-judge + 用户反馈) | ✅ | `tests/test_eval_*.py` 34 个测试全绿 |
 
 ### 19.2 已落地的代码模块 (按"用频率"排序)
 
 | 模块 | 路径 | 关键能力 |
 | --- | --- | --- |
-| **FastAPI 入口** | `apps/api/src/idm_api/main.py` | lifespan, CORS, 5 个 router 挂载 |
+| **FastAPI 入口** | `apps/api/src/idm_api/main.py` | lifespan, CORS, 6 个 router 挂载 (含 feedback) |
 | **Settings** | `apps/api/src/idm_api/config.py` | Pydantic, 读 `.env` |
 | **DB engine** | `apps/api/src/idm_api/db.py` | async SQLAlchemy + 同步 url 切分 |
 | **Models** | `packages/kg/src/idm_kg/models/*.py` | Service/Database/Schema/TableAsset/ColumnAsset/AISuggestion |
@@ -593,9 +605,13 @@ flowchart LR
 | **Skill #1** | `apps/api/src/idm_api/skills/builtin/discover_clickhouse_assets.py` | 扫库→表→列+采样→入 KG |
 | **Skill #2** | `apps/api/src/idm_api/skills/builtin/infer_table_description.py` | LLM 推断描述→`ai_suggestion.pending` |
 | **Skill #3** | `apps/api/src/idm_api/skills/builtin/classify_pii_columns.py` | LLM 推断 PII→`ai_suggestion.pii_class` |
-| **Routers** | `apps/api/src/idm_api/routers/{health,services,assets,suggestions,skills}.py` | 全部 `/api/v1/...` REST |
+| **Skill #4-9** | `apps/api/src/idm_api/skills/builtin/{parse_dbt_manifest,analyze_dbt_code,parse_superset_dashboard,infer_table_owners,nl2sql,detect_anomalies}.py` | 见各文件 |
+| **Routers** | `apps/api/src/idm_api/routers/{health,services,assets,suggestions,skills,owners,feedback}.py` | 全部 `/api/v1/...` REST |
+| **Eval Harness** | `apps/api/src/idm_api/eval/{types,judge,runner,cli,feedback}.py` | Gold Snapshot + LLM-judge + fallback + 用户反馈 → few-shot |
+| **Eval Cases** | `apps/api/src/idm_api/eval/cases/*.jsonl` | 5 个 skill 的 gold cases (3-3 条/技能) |
 | **前端 (骨架)** | `apps/web/src/{ui,pages,App.tsx}` | ag-grid Community + 自研 UI Kit, **5 个页面** (Assets/Skills/Suggestions/Health) |
 | **Alembic** | `migrations/versions/0001_initial_schema.py` | M1 初始 schema |
+| **CI Workflows** | `.github/workflows/{ci,skill-eval}.yml` | lint/test/eval 三段式 |
 | **Compose** | `deploy/docker/compose.dev.yml` | PG (5432) + Redis (16379) + ClickHouse (18123) + Langfuse (13001) |
 | **Seed 数据** | `deploy/docker/seed-shop.sql` | shop.users / orders_daily / payments / order_items / products |
 
@@ -627,26 +643,26 @@ flowchart LR
 | **数据库账号** | idm / idm (PG), idm_ro / idm_ro (CH) |
 | **依赖注入** | `Depends(get_db)` (FastAPI), `get_clickhouse_mcp()` (全局单例) |
 | **Skill 注册** | 装饰器 `@skill(name, version, agent)`, handler 签名 `(ctx, **inputs) -> SkillResult` |
-| **LLM 降级** | gpt-5 → deepseek-v3 → qwen-local → mock (无 key 时) |
+| **LLM 降级** | deepseek-v4 → gpt-5 → mock (无 key 时) |
 | **asset fqn** | 模式 `^[a-z0-9_.:-]+$` (允许服务名带 `-`, 如 `clickhouse-prod`) |
 | **ai_suggestion 流** | pending → (人工 approve/reject) → 落 table_asset.description |
 
-### 19.5 暂未实现 (M1 S1.3+ 待办)
+### 19.5 已完成 (截至 M1 S1.14)
 
-| 任务 | 优先级 | 备注 |
+| 任务 | 状态 | 备注 |
 | --- | --- | --- |
-| 前端 Skills 页面 (ag-grid 触发 / 展示 trace) | P1 | UI 已有, 需接 API |
-| GitHub MCP Client (read file / blame / search) | P1 | 走 `mcp-python-sdk` 官方 |
-| Superset Export 解析 (dashboard yaml) | P1 | 自研 parser, 读 GCS |
-| dbt manifest 解析 | P2 | json → table + lineage |
-| Airflow DAG 解析 | P2 | API + 自研 |
-| Langfuse 接入 (trace 上报) | P2 | 已起容器, SDK 未接 |
-| PII 推断 Skill | P2 | profile=local 路由 |
-| NL2SQL Skill (5 层 Guard) | P2 | 主打场景 |
-| Insight / Anomaly 引擎 | P3 | 周期任务 + 推送 |
-| Eval Harness (Gold Snapshot) | P3 | `tests/gold/*.json` |
-| 单元 / 集成测试 (pytest) | P1 | 已有 conftest, 待补 |
-| CI (GitHub Actions) | P1 | `.github/workflows/ci.yml` 已配, 待跑通 |
+| 前端 Skills 页面 (ag-grid 触发 / 展示 trace) | ✅ | M1 S1.3 完成 |
+| GitHub MCP Client (read file / blame / search) | ✅ | M1 S1.13 完成 (owner 推断用) |
+| Superset Export 解析 (dashboard yaml) | ✅ | M1 S1.6 完成 |
+| dbt manifest 解析 | ✅ | M1 S1.5 完成 |
+| Airflow DAG 解析 | ✅ | M1 S1.7 完成 |
+| Langfuse 接入 (trace 上报) | ✅ | 通过 LiteLLM 间接 |
+| PII 推断 Skill | ✅ | M1 S1.4 完成 |
+| NL2SQL Skill (5 层 Guard) | ✅ | M1 S1.10 完成 |
+| Insight / Anomaly 引擎 | ✅ | M1 S1.11 完成 |
+| Eval Harness (Gold Snapshot) | ✅ | M1 S1.14 完成, 含 LLM-judge + 用户反馈 + few-shot 导出 |
+| 单元 / 集成测试 (pytest) | ✅ | 51 个测试全绿 |
+| CI (GitHub Actions) | ✅ | `.github/workflows/{ci,skill-eval}.yml` |
 
 ### 19.6 不要重复造轮子 (Do NOT Re-Implement)
 

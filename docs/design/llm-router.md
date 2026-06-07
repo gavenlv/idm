@@ -1,6 +1,6 @@
-# IDM — LLM 路由详细设计 (GPT-5 + DeepSeek + 本地)
+﻿# IDM — LLM 路由详细设计 (DeepSeek V4 主力 + GPT-5 备选)
 
-> 主力 GPT-5，备选 DeepSeek，兜底本地 Qwen
+> 主力 DeepSeek V4，备选 GPT-5
 > 通过 LiteLLM 统一网关 + Langfuse 可观测
 > 本文给出配置、调用、缓存、限流、成本控制
 
@@ -30,20 +30,22 @@
 | **低成本** | 每月 ≤ $2k (1000 use case / 200k LLM call) |
 | **高可用** | 任一模型不可用 → 自动 fallback，业务无感 |
 | **可观测** | 每次调用 token / 延迟 / 成本 / 评分 |
-| **合规** | 敏感数据只走本地 / 私有部署 |
+| **合规** | 敏感数据严格 mask；PII 列禁送 LLM；走审计 |
 
 ---
 
 ## 2. 模型矩阵
 
-| 模型 | 部署 | 用途 | 单价 (per 1M tok) | 上下文 |
+> **本版本仅支持 2 个生产模型**：DeepSeek V4（主力）+ GPT-5（备选）。
+> 历史模型（DeepSeek V3 / DeepSeek R1 / Qwen 本地）已下线，不再维护。
+
+| 模型 | 部署 | 角色 | 单价 (per 1M tok) | 上下文 |
 | --- | --- | --- | --- | --- |
-| **gpt-5** | OpenAI API | 主力 / 推理 / 代码 | $3 in / $12 out | 128k |
-| **deepseek-chat (V3)** | DeepSeek API | 中文 / 长文 / 成本 | $0.14 in / $0.28 out | 64k |
-| **deepseek-reasoner (R1)** | DeepSeek API | 复杂推理 / 数学 | $0.55 in / $2.19 out | 64k |
-| **qwen2.5:32b** | 本地 Ollama | 合规 / 内网 / 兜底 | 0 (电费) | 32k |
-| **bge-large-zh** | 本地 | Embedding | 0 | 512 |
-| **text-embedding-3-large** | OpenAI API | Embedding | $0.13 | 8k |
+| **deepseek-v4** | DeepSeek API | **主力** — 中文 / 长文 / 成本 / 文档 / 推断 | $0.14 in / $0.28 out | 64k |
+| **gpt-5** | OpenAI API | **备选** — 推理 / 复杂归因 / 代码 / 高质量英文 | $3 in / $12 out | 128k |
+| **gpt-5.4** (可平滑升级) | OpenAI API | 同 gpt-5 档，升级路径 | 同档 | 128k |
+| **text-embedding-3-large** | OpenAI API | Embedding 主 | $0.13 | 8k |
+| **bge-large-zh** | 本地 | Embedding 备 | 0 | 512 |
 
 ---
 
@@ -53,14 +55,14 @@
 
 ```mermaid
 flowchart TD
-    A[LLM Call] --> B{敏感数据?}
-    B -- 是 --> C[qwen-local]
+    A[LLM Call] --> B{含 PII?}
+    B -- 是 --> C[mask 后送 deepseek-v4<br/>PII 列禁送]
     B -- 否 --> D{长上下文 > 60k?}
-    D -- 是 --> E[deepseek-v3]
+    D -- 是 --> E[deepseek-v4]
     D -- 否 --> F{需要复杂推理?}
     F -- 是 --> G[gpt-5]
     F -- 否 --> H{中文为主?}
-    H -- 是 --> I[deepseek-v3]
+    H -- 是 --> I[deepseek-v4]
     H -- 否 --> J[gpt-5]
     C --> K[记录 trace]
     E --> K
@@ -75,32 +77,30 @@ flowchart TD
 # idm/llm/router.py
 def pick_model(task: dict) -> str:
     if task.get("contains_pii"):
-        return "qwen-local"
+        # PII 仍走 deepseek-v4 (主力), 但先 mask
+        return "deepseek-v4"
 
     if task.get("estimated_input_tokens", 0) > 60_000:
-        return "deepseek-v3"
+        return "deepseek-v4"   # 长文默认走 v4
 
     if task.get("requires_reasoning"):
-        return "gpt-5"  # 或 gpt-5 + 后续 deepseek-reasoner
+        return "gpt-5"         # 复杂推理 / 数学 / 代码走 gpt-5
 
     if task.get("language", "zh") in ("zh", "zh-CN"):
-        return "deepseek-v3"  # 中文性价比
+        return "deepseek-v4"   # 中文默认走 v4
 
-    return "gpt-5"
+    return "deepseek-v4"       # 默认走 v4
 ```
 
 ### 3.3 任务 → 默认模型 速查表
 
 | 任务 | 默认 | 备选 |
 | --- | --- | --- |
-| Doc Generator | gpt-5 | deepseek-v3 |
-| NL2SQL | gpt-5 | deepseek-v3 |
-| Entity Resolution | gpt-5 | deepseek-v3 |
-| PII 分类 | gpt-5 | deepseek-v3 |
-| 长文档摘要 (>30k) | deepseek-v3 | gpt-5 |
-| 大批量回填 (>5k) | deepseek-v3 | qwen-local |
-| 敏感字段分析 | qwen-local | - |
-| Code Review (PR) | gpt-5 | deepseek-reasoner |
+| Planner / Doc / NL2SQL / Owner / PII | **deepseek-v4** | gpt-5 |
+| Schema 发现 / Lineage 解析 | **deepseek-v4** | gpt-5 |
+| 复杂归因 / 数学 / Code Review (PR) | **gpt-5** | deepseek-v4 |
+| 异常检测 (含 PII 列) | **deepseek-v4** (PII 先 mask) | gpt-5 |
+| 批量回填 (>5k) | **deepseek-v4** | gpt-5 |
 | Embedding | text-embedding-3-large | bge-large-zh |
 
 ---
@@ -126,32 +126,22 @@ env:
 
 config:
   model_list:
-    - model_name: gpt-5
-      litellm_params:
-        model: openai/gpt-5
-        api_key: os.environ/OPENAI_API_KEY
-    - model_name: deepseek-v3
+    - model_name: deepseek-v4
       litellm_params:
         model: deepseek/deepseek-chat
         api_key: os.environ/DEEPSEEK_API_KEY
         api_base: https://api.deepseek.com
-    - model_name: deepseek-r1
+    - model_name: gpt-5
       litellm_params:
-        model: deepseek/deepseek-reasoner
-        api_key: os.environ/DEEPSEEK_API_KEY
-        api_base: https://api.deepseek.com
-    - model_name: qwen-local
-      litellm_params:
-        model: ollama/qwen2.5:32b
-        api_base: http://ollama.idm.svc:11434
+        model: openai/gpt-5
+        api_key: os.environ/OPENAI_API_KEY
   router_settings:
     routing_strategy: simple-shuffle
     num_retries: 3
     timeout: 60
     fallbacks:
-      - { gpt-5: ["deepseek-v3", "qwen-local"] }
-      - { deepseek-v3: ["qwen-local", "gpt-5"] }
-      - { deepseek-r1: ["gpt-5"] }
+      - { deepseek-v4: ["gpt-5"] }
+      - { gpt-5: ["deepseek-v4"] }
   litellm_settings:
     drop_params: true
     success_callback: ["langfuse"]
@@ -167,16 +157,16 @@ metadata: { name: idm-litellm-config, namespace: idm-ai }
 data:
   config.yaml: |
     model_list:
+      - model_name: deepseek-v4
+        litellm_params: { model: deepseek/deepseek-chat, api_key: os.environ/DEEPSEEK_API_KEY, api_base: https://api.deepseek.com }
       - model_name: gpt-5
         litellm_params: { model: openai/gpt-5, api_key: os.environ/OPENAI_API_KEY }
-      - model_name: deepseek-v3
-        litellm_params: { model: deepseek/deepseek-chat, api_key: os.environ/DEEPSEEK_API_KEY, api_base: https://api.deepseek.com }
-      - model_name: qwen-local
-        litellm_params: { model: ollama/qwen2.5:32b, api_base: http://ollama.idm.svc:11434 }
     router_settings:
       num_retries: 3
       timeout: 60
-      fallbacks: [{ gpt-5: [deepseek-v3, qwen-local] }]
+      fallbacks:
+        - { deepseek-v4: [gpt-5] }
+        - { gpt-5: [deepseek-v4] }
 ```
 
 ---
@@ -192,7 +182,7 @@ from idm.llm.cache import cached
 from idm.llm.trace import trace_llm
 
 class LLM:
-    def __init__(self, default_model: str = "gpt-5"):
+    def __init__(self, default_model: str = "deepseek-v4"):
         self.default = default_model
         self.api_base = os.environ.get("LITELLM_URL", "http://litellm.idm-ai:4000")
 
@@ -212,7 +202,7 @@ class LLM:
     ) -> str | dict:
         chosen = model or self.default
         if contains_pii:
-            chosen = "qwen-local"
+            chosen = "deepseek-v4"  # PII 一律先 mask, 再送 v4
             messages = mask_pii(messages)
 
         kwargs = dict(
@@ -226,7 +216,7 @@ class LLM:
                 "use_case": use_case,
                 "contains_pii": contains_pii,
             },
-            fallbacks=fallback_models or ["deepseek-v3", "qwen-local"],
+            fallbacks=fallback_models or ["gpt-5"],
             num_retries=3,
             timeout=60,
         )
@@ -240,9 +230,9 @@ class LLM:
 
 ```python
 # infer_table_description skill 内部
-llm = LLM()
+llm = LLM()  # 默认 deepseek-v4
 text = await llm.complete(
-    model="gpt-5",
+    model="deepseek-v4",
     messages=[
         {"role": "system", "content": "你是资深数据工程师"},
         {"role": "user",   "content": prompt}
@@ -301,7 +291,7 @@ LiteLLM 已支持：开启 `cache: { mode: "default" }`
 | 级别 | 限额 | 超限动作 |
 | --- | --- | --- |
 | **全局 / 月** | $2,000 | 邮件告警 |
-| **全局 / 月** | $3,000 | 自动降级到 deepseek 优先 |
+| **全局 / 月** | $3,000 | 自动收紧到 deepseek-v4 only（gpt-5 仅限 critical） |
 | **Use Case / 月** | $100 | 通知 Owner |
 | **User / 天** | 50k tokens | 限速 |
 
@@ -326,13 +316,12 @@ async def check_quota(actor: str, cost: float):
 async def auto_downgrade_if_over_budget():
     spent = await get_month_spend()
     if spent > 2000:
-        # 优先 deepseek
-        global DEFAULT_MODEL
-        DEFAULT_MODEL = "deepseek-v3"
+        # 告警 + 通知
+        await notify_cost_alert(spent)
     if spent > 3000:
-        # 全部走 deepseek
-        # gpt-5 仍保留给 critical
-        ...
+        # gpt-5 仅限 critical, 其他强制 deepseek-v4
+        global CRITICAL_ONLY_MODELS
+        CRITICAL_ONLY_MODELS = {"gpt-5"}
 ```
 
 ---
@@ -368,10 +357,12 @@ def mask_pii(messages):
 
 ### 8.2 数据隔离
 
-- **使用 qwen-local 强制条件**:
+- **PII 列禁送 LLM**（除非显式声明 `contains_pii=true` 并完成 mask）
+- **PII 强制 mask 条件**:
   - `use_case.guardrails.llm.data_masking: true`
   - `task.contains_pii: true` (Skill 显式声明)
   - 表的 `pii_class != 'none'` 的列
+- **mask 后统一送 deepseek-v4**（主力），不再区分本地/云端
 
 ---
 
@@ -470,8 +461,8 @@ jobs:
 
 | 故障 | 检测 | 应对 |
 | --- | --- | --- |
-| **OpenAI 不可用** | LiteLLM 自动 fallback | gpt-5 → deepseek-v3 → qwen-local |
-| **DeepSeek 不可用** | LiteLLM 自动 fallback | deepseek-v3 → qwen-local → 缓存 |
+| **OpenAI 不可用** | LiteLLM 自动 fallback | gpt-5 → deepseek-v4 |
+| **DeepSeek 不可用** | LiteLLM 自动 fallback | deepseek-v4 → gpt-5 → 缓存 |
 | **LiteLLM 自身挂** | K8s liveness probe | 重启 + 客户端重试 |
 | **某个 skill 持续失败** | Eval harness 报警 | 暂停该 skill, 用 default 行为 |
 | **LLM 输出格式错** | JSON Schema 校验 | 自动 retry + few-shot |
@@ -523,7 +514,6 @@ LANGFUSE_PUBLIC_KEY=pk-...
 LANGFUSE_SECRET_KEY=sk-...
 LANGFUSE_HOST=http://langfuse.idm.svc:3000
 REDIS_URL=redis://10.0.0.6:6379/0
-OLLAMA_URL=http://ollama.idm.svc:11434
 ```
 
 ## 附录 B. 常用 Prompt 模板 (节选)

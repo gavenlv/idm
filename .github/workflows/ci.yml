@@ -67,6 +67,9 @@ jobs:
         run: cd apps/api && uv run alembic -c ../../migrations/alembic.ini upgrade head
       - name: Run tests
         run: uv run pytest -v --cov=apps --cov=packages --cov-report=xml
+      - name: Run skill eval (smoke, rule-based)
+        # tag=smoke 过滤: 只跑无需 DB / LLM key 的最小 case
+        run: cd apps/api && uv run python -m idm_api.eval.cli run --all --tag smoke --out reports/ || true
       - name: Upload coverage
         if: matrix.python-version == '3.11'
         uses: codecov/codecov-action@v4

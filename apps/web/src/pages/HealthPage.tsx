@@ -1,6 +1,10 @@
+/**
+ * HealthPage — Service info and readiness checks.
+ */
 import { useQuery } from "@tanstack/react-query";
-import { Card, Tag } from "../ui";
 import axios from "axios";
+import { useTranslation } from "react-i18next";
+import { Card, Stat, Stats, Status, Tag } from "../ui";
 
 interface HealthInfo {
   service: string;
@@ -18,6 +22,7 @@ interface Readiness {
 }
 
 export function HealthPage() {
+  const { t } = useTranslation();
   const { data: info } = useQuery<HealthInfo>({
     queryKey: ["info"],
     queryFn: async () => (await axios.get("/api/health/info")).data,
@@ -30,35 +35,108 @@ export function HealthPage() {
 
   return (
     <>
-      <Card title="Service Info">
+      <Stats>
+        <Stat
+          label={t("common.status")}
+          value={
+            ready ? (
+              <Status
+                kind={
+                  ready.status === "ok"
+                    ? "ok"
+                    : ready.status === "degraded"
+                      ? "warn"
+                      : "fail"
+                }
+              >
+                {ready.status}
+              </Status>
+            ) : (
+              "…"
+            )
+          }
+        />
+        <Stat label={t("health.env")} value={info?.env ?? "…"} />
+        <Stat label={t("health.version")} value={info?.version ?? "…"} />
+        <Stat
+          label={t("health.plannerModel")}
+          value={info ? <Tag solid color="#2e66f0">{info.planner_model}</Tag> : "…"}
+        />
+      </Stats>
+
+      <Card title={t("health.serviceInfo")}>
         {info ? (
-          <ul>
-            <li>Service: {info.service}</li>
-            <li>Env: {info.env}</li>
-            <li>Version: {info.version}</li>
-            <li>Planner Model: <Tag color="#1f6feb">{info.planner_model}</Tag></li>
-            <li>Default Model: <Tag>{info.default_model}</Tag></li>
-          </ul>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "160px 1fr",
+              gap: "8px 16px",
+              fontSize: 13,
+              alignItems: "center",
+            }}
+          >
+            <div className="idm-text-muted">{t("health.service")}</div>
+            <div className="idm-fw-600">{info.service}</div>
+            <div className="idm-text-muted">{t("health.env")}</div>
+            <div>
+              <Tag>{info.env}</Tag>
+            </div>
+            <div className="idm-text-muted">{t("health.version")}</div>
+            <div style={{ fontFamily: "var(--idm-mono-font)" }}>{info.version}</div>
+            <div className="idm-text-muted">{t("health.plannerModel")}</div>
+            <div>
+              <Tag solid color="#2e66f0">{info.planner_model}</Tag>
+            </div>
+            <div className="idm-text-muted">{t("health.defaultModel")}</div>
+            <div>
+              <Tag>{info.default_model}</Tag>
+            </div>
+          </div>
         ) : (
-          <p>加载中…</p>
+          <p className="idm-text-muted">Loading…</p>
         )}
       </Card>
-      <Card title="Readiness">
+
+      <Card title={t("health.readiness")}>
         {ready ? (
           <>
-            <p>
-              Status: <Tag color={ready.status === "ok" ? "#52c41a" : "#fa8c16"}>{ready.status}</Tag>
-            </p>
-            <ul>
+            <div className="idm-flex idm-gap-2 idm-items-center idm-mb-3">
+              <span className="idm-text-muted">{t("common.status")}:</span>
+              <Status
+                kind={
+                  ready.status === "ok"
+                    ? "ok"
+                    : ready.status === "degraded"
+                      ? "warn"
+                      : "fail"
+                }
+              >
+                {ready.status}
+              </Status>
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "160px 1fr",
+                gap: "8px 16px",
+                fontSize: 13,
+                alignItems: "center",
+              }}
+            >
               {Object.entries(ready.checks).map(([k, v]) => (
-                <li key={k}>
-                  {k}: {v === "ok" ? <Tag color="#52c41a">ok</Tag> : <Tag color="#d4380d">{v}</Tag>}
-                </li>
+                <>
+                  <div key={`k-${k}`} className="idm-text-muted" style={{ fontFamily: "var(--idm-mono-font)" }}>
+                    {k}
+                  </div>
+                  <div key={`v-${k}`}>
+                    <Status kind={v === "ok" ? "ok" : "fail"}>{v}</Status>
+                  </div>
+                </>
               ))}
-            </ul>
+            </div>
           </>
         ) : (
-          <p>检查中…</p>
+          <p className="idm-text-muted">Loading…</p>
         )}
       </Card>
     </>

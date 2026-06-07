@@ -1,0 +1,1 @@
+{"center_fqn":"clickhouse-prod.shop.default.order_items","center_id":"b2b5ce82-f59f-4a51-ae91-5f1d7cd6c32f","upstream":[],"downstream":[],"nodes":[{"id":"b2b5ce82-f59f-4a51-ae91-5f1d7cd6c32f","fqn":"clickhouse-prod.shop.default.order_items","asset_type":"table","tier":"normal","name":"order_items"}],"edges":[]}

@@ -1,0 +1,10 @@
+[
+  {
+    "skill": "infer_table_description",
+    "avg_score": 0.0,
+    "passed": 0,
+    "total": 3,
+    "result_json": "..\\.tmp\\eval-test\\infer_table_description.result.json",
+    "report_md": "..\\.tmp\\eval-test\\infer_table_description.report.md"
+  }
+]

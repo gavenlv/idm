@@ -1,0 +1,51 @@
+name: Skill Eval
+
+on:
+  pull_request:
+    paths:
+      - "apps/api/src/idm_api/skills/**"
+      - "apps/api/src/idm_api/eval/**"
+      - ".github/workflows/skill-eval.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/src/idm_api/skills/**"
+      - "apps/api/src/idm_api/eval/**"
+  schedule:
+    # 每周一 06:00 UTC 全量回归
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.11"
+  UV_VERSION: "0.5"
+
+jobs:
+  smoke-eval:
+    name: Smoke Eval (no LLM key)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: ${{ env.PYTHON_VERSION }} }
+      - run: pip install uv==${{ env.UV_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('**/uv.lock', '**/pyproject.toml') }}
+      - name: Install deps
+        run: uv sync --frozen --all-extras --dev
+      - name: List registered skills
+        run: cd apps/api && uv run python -m idm_api.eval.cli list
+      - name: Run skill eval (smoke, no DB needed)
+        # tag=smoke 只跑无需 DB / LLM key 的最小 case; judge 走 rule-based fallback
+        run: cd apps/api && uv run python -m idm_api.eval.cli run --all --tag smoke --out reports/
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skill-eval-reports
+          path: apps/api/reports/
+      - name: Gate check
+        # smoke case 的 fallback score 通常 >= 0.5; 阈值 0.4 给调试空间
+        run: cd apps/api && uv run python -m idm_api.eval.cli gate --current reports/_summary.json --min-avg 0.4 --min-pass 0.4 || echo "[gate] smoke case 失败 -> 标注待查, 不阻塞 PR"

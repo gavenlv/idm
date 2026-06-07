@@ -1,0 +1,2 @@
+{"id":"anom-1","skill":"detect_anomalies","input":{"service":"mock-svc","apply":false,"skip_drift":true,"skip_null":true},"gold":{"contains":["owner_gap"]},"tags":["smoke"]}
+{"id":"anom-2","skill":"detect_anomalies","input":{"apply":false,"skip_drift":true,"skip_null":true,"skip_pii":true},"gold":{"contains":["owner_gap"]},"tags":["owner-only"]}

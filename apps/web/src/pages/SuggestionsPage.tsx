@@ -1,22 +1,44 @@
+/**
+ * SuggestionsPage — Review & approve AI-generated governance suggestions.
+ *
+ * Layout:
+ * - Tabs: Pending / Approved / Rejected (with counts)
+ * - Type filter
+ * - Table: suggestion rows
+ * - Drawer: full payload + LLM rationale + Approve / Reject actions
+ */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card, Tag, Button, Drawer } from "../ui";
-import { SuggestionsApi, type Suggestion } from "../lib/api";
-import { AgGridReact } from "ag-grid-react";
+import { useTranslation } from "react-i18next";
 import { useMemo, useState } from "react";
+import { AgGridReact } from "ag-grid-react";
+import type { ColDef } from "ag-grid-community";
+import { Button, Card, Drawer, Select, Stat, Stats, Status, Tabs, Tag, Textarea } from "../ui";
+import { SuggestionsApi, type Suggestion } from "../lib/api";
 
 type Tab = "pending" | "approved" | "rejected";
 
-const TYPE_LABEL: Record<string, string> = {
-  description: "表描述",
-  pii_class: "PII 分类",
-  owner: "Owner",
-  lineage: "Lineage",
-  glossary: "术语",
-  quality_rule: "质量规则",
-  insight: "洞察",
+const TYPE_I18N_KEY: Record<string, string> = {
+  description: "suggestions.typeDescription",
+  pii_class: "suggestions.typePii",
+  owner: "suggestions.typeOwner",
+  lineage: "suggestions.typeLineage",
+  glossary: "suggestions.typeGlossary",
+  quality_rule: "suggestions.typeQuality",
+  insight: "suggestions.typeInsight",
+};
+
+const TYPE_COLOR: Record<string, string> = {
+  description: "#0b7ea4",
+  pii_class: "#cf1124",
+  owner: "#7159f3",
+  lineage: "#2e66f0",
+  glossary: "#2e8540",
+  quality_rule: "#d97706",
+  insight: "#1d44ad",
 };
 
 export function SuggestionsPage() {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("pending");
   const [typeFilter, setTypeFilter] = useState<string>("");
@@ -33,7 +55,6 @@ export function SuggestionsPage() {
       }),
   });
 
-  // 顶部统计
   const stats = useQuery({
     queryKey: ["suggestions-stats"],
     queryFn: async () => {
@@ -47,68 +68,102 @@ export function SuggestionsPage() {
     refetchInterval: 10_000,
   });
 
-  const columnDefs = useMemo(
+  const tabItems = useMemo(
+    () => [
+      { key: "pending" as Tab, label: t("suggestions.tabPending"), count: stats.data?.pending ?? "…", color: "#d97706" },
+      { key: "approved" as Tab, label: t("suggestions.tabApproved"), count: stats.data?.approved ?? "…", color: "#2e8540" },
+      { key: "rejected" as Tab, label: t("suggestions.tabRejected"), count: stats.data?.rejected ?? "…", color: "#878d96" },
+    ],
+    [t, stats.data],
+  );
+
+  const columnDefs = useMemo<ColDef<Suggestion>[]>(
     () => [
       {
         field: "suggestion_type",
-        headerName: "类型",
-        width: 130,
-        cellRenderer: (p: { value: string }) => <Tag color="#1f6feb">{TYPE_LABEL[p.value] ?? p.value}</Tag>,
+        headerName: t("common.type"),
+        width: 140,
+        cellRenderer: (p: { value: string }) => (
+          <Tag solid color={TYPE_COLOR[p.value] ?? "#697077"}>
+            {TYPE_I18N_KEY[p.value] ? t(TYPE_I18N_KEY[p.value]) : p.value}
+          </Tag>
+        ),
       },
-      { field: "skill", headerName: "Skill", width: 220, tooltipField: "skill" },
-      { field: "model", headerName: "Model", width: 110 },
+      {
+        field: "skill",
+        headerName: t("common.skill"),
+        width: 240,
+        tooltipField: "skill",
+        cellRenderer: (p: { value: string }) => (
+          <span style={{ fontFamily: "var(--idm-mono-font)", fontSize: 11 }}>{p.value}</span>
+        ),
+      },
+      {
+        field: "model",
+        headerName: t("common.model"),
+        width: 130,
+        cellRenderer: (p: { value: string }) => <Tag>{p.value}</Tag>,
+      },
       {
         field: "confidence",
-        headerName: "Conf",
-        width: 90,
-        cellRenderer: (p: { value: number }) => `${(p.value * 100).toFixed(0)}%`,
+        headerName: t("common.confidence"),
+        width: 100,
+        cellRenderer: (p: { value: number }) => {
+          const pct = (p.value * 100).toFixed(0);
+          const color = p.value >= 0.85 ? "#2e8540" : p.value >= 0.6 ? "#d97706" : "#cf1124";
+          return <Tag solid color={color}>{pct}%</Tag>;
+        },
       },
       {
         field: "target_type",
-        headerName: "Target",
-        width: 90,
+        headerName: t("common.target"),
+        width: 100,
         cellRenderer: (p: { value: string }) => <Tag>{p.value}</Tag>,
       },
       {
         field: "payload",
-        headerName: "摘要",
+        headerName: "Summary",
         flex: 1,
-        valueGetter: (p: { data: Suggestion }) => payloadSummary(p.data.payload),
-        tooltipValueGetter: (p: { data: Suggestion }) => JSON.stringify(p.data.payload ?? {}, null, 2),
+        valueGetter: (p) => (p.data ? payloadSummary(p.data.payload) : ""),
+        tooltipValueGetter: (p) =>
+          p.data ? JSON.stringify(p.data.payload ?? {}, null, 2) : "",
+        cellRenderer: (p: { value: string }) => (
+          <span style={{ color: "var(--idm-text-muted)" }}>{p.value}</span>
+        ),
       },
       {
         field: "created_at",
-        headerName: "Created",
+        headerName: t("common.createdAt"),
         width: 180,
-        valueFormatter: (p: { value: string }) => (p.value ? new Date(p.value).toLocaleString() : ""),
+        valueFormatter: (p: { value: string }) =>
+          p.value ? new Date(p.value).toLocaleString() : "",
       },
       ...(tab === "pending"
-        ? [
+        ? ([
             {
-              headerName: "Action",
-              width: 220,
+              headerName: t("common.actions"),
+              width: 130,
               cellRenderer: (p: { data: Suggestion }) => (
-                <div style={{ display: "flex", gap: 4 }}>
-                  <Button size="sm" variant="primary" onClick={() => openDrawer(p.data)}>
-                    审核
-                  </Button>
-                </div>
+                <Button size="sm" variant="primary" onClick={() => openDrawer(p.data)}>
+                  {t("suggestions.review")}
+                </Button>
               ),
             },
-          ]
+          ] as ColDef<Suggestion>[])
         : []),
       ...(tab !== "pending"
-        ? [
+        ? ([
             {
               field: "reviewed_at",
-              headerName: "Reviewed",
+              headerName: t("common.reviewedAt"),
               width: 180,
-              valueFormatter: (p: { value: string | null }) => (p.value ? new Date(p.value).toLocaleString() : ""),
+              valueFormatter: (p: { value: string | null }) =>
+                p.value ? new Date(p.value).toLocaleString() : "",
             },
-          ]
+          ] as ColDef<Suggestion>[])
         : []),
     ],
-    [tab],
+    [tab, t],
   );
 
   function openDrawer(s: Suggestion) {
@@ -134,23 +189,48 @@ export function SuggestionsPage() {
 
   return (
     <>
-      {/* 顶部: tabs + 统计 + 类型过滤 */}
+      <Stats>
+        <Stat
+          label={t("suggestions.tabPending")}
+          value={stats.data?.pending ?? "…"}
+          hint="Awaiting human review"
+        />
+        <Stat
+          label={t("suggestions.tabApproved")}
+          value={stats.data?.approved ?? "…"}
+          hint="Already written to KG"
+        />
+        <Stat
+          label={t("suggestions.tabRejected")}
+          value={stats.data?.rejected ?? "…"}
+          hint="Discarded"
+        />
+        <Stat
+          label="Total"
+          value={
+            (stats.data?.pending ?? 0) +
+            (stats.data?.approved ?? 0) +
+            (stats.data?.rejected ?? 0)
+          }
+          hint="All suggestions"
+        />
+      </Stats>
+
       <Card
-        title="LLM 建议审核"
+        title={t("suggestions.title")}
         extra={
-          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            <Tabs value={tab} onChange={setTab} stats={stats.data} />
-            <select
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              style={{ padding: "4px 8px", border: "1px solid #d9d9d9", borderRadius: 4 }}
-            >
-              <option value="">所有类型</option>
-              <option value="description">表描述</option>
-              <option value="pii_class">PII 分类</option>
-              <option value="owner">Owner</option>
-              <option value="lineage">Lineage</option>
-            </select>
+          <div className="idm-flex idm-gap-3 idm-items-center">
+            <Tabs value={tab} onChange={setTab} items={tabItems} />
+            <Select size="sm" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+              <option value="">{t("suggestions.allTypes")}</option>
+              <option value="description">{t("suggestions.typeDescription")}</option>
+              <option value="pii_class">{t("suggestions.typePii")}</option>
+              <option value="owner">{t("suggestions.typeOwner")}</option>
+              <option value="lineage">{t("suggestions.typeLineage")}</option>
+              <option value="glossary">{t("suggestions.typeGlossary")}</option>
+              <option value="quality_rule">{t("suggestions.typeQuality")}</option>
+              <option value="insight">{t("suggestions.typeInsight")}</option>
+            </Select>
           </div>
         }
       >
@@ -162,100 +242,158 @@ export function SuggestionsPage() {
             pagination
             paginationPageSize={50}
             onRowClicked={(e) => tab === "pending" && e.data && openDrawer(e.data)}
+            getRowId={(p) => p.data.id}
+            rowHeight={36}
           />
         </div>
       </Card>
 
-      {/* 审核 Drawer */}
       <Drawer
         open={!!selected}
         onClose={() => setSelected(null)}
-        title={selected ? `${TYPE_LABEL[selected.suggestion_type] ?? selected.suggestion_type} · ${selected.model}` : ""}
-        width={620}
+        title={
+          selected ? (
+            <span className="idm-flex idm-items-center idm-gap-2">
+              <Tag solid color={TYPE_COLOR[selected.suggestion_type] ?? "#697077"}>
+                {TYPE_I18N_KEY[selected.suggestion_type]
+                  ? t(TYPE_I18N_KEY[selected.suggestion_type])
+                  : selected.suggestion_type}
+              </Tag>
+              <span style={{ fontFamily: "var(--idm-mono-font)" }}>{selected.model}</span>
+            </span>
+          ) : (
+            ""
+          )
+        }
+        width={680}
       >
         {selected && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 13 }}>
+          <div className="idm-flex-col idm-gap-3">
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 8,
+                fontSize: 13,
+              }}
+            >
               <div>
-                <b>Conf:</b> {(selected.confidence * 100).toFixed(0)}%
+                <span className="idm-text-muted">{t("common.confidence")}:</span>{" "}
+                <Tag solid color={selected.confidence >= 0.85 ? "#2e8540" : selected.confidence >= 0.6 ? "#d97706" : "#cf1124"}>
+                  {(selected.confidence * 100).toFixed(0)}%
+                </Tag>
               </div>
               <div>
-                <b>Skill:</b> {selected.skill}
+                <span className="idm-text-muted">{t("common.skill")}:</span>{" "}
+                <code style={{ fontFamily: "var(--idm-mono-font)", fontSize: 11 }}>
+                  {selected.skill}
+                </code>
               </div>
               <div>
-                <b>Target:</b> {selected.target_type} · {selected.target_id.slice(0, 8)}…
+                <span className="idm-text-muted">{t("common.target")}:</span>{" "}
+                <Tag>{selected.target_type}</Tag>{" "}
+                <span className="idm-text-muted" style={{ fontSize: 11 }}>
+                  {selected.target_id.slice(0, 8)}…
+                </span>
               </div>
               <div>
-                <b>Use Case:</b> {selected.use_case_id ?? "—"}
+                <span className="idm-text-muted">{t("suggestions.useCase")}:</span>{" "}
+                {selected.use_case_id ?? "—"}
               </div>
             </div>
 
             {selected.rationale && (
               <div>
-                <b>LLM 理由:</b>
-                <p style={{ background: "#f7f8fa", padding: 10, borderRadius: 6, marginTop: 4 }}>{selected.rationale}</p>
+                <div
+                  className="idm-fw-600"
+                  style={{
+                    fontSize: 12,
+                    color: "var(--idm-text-muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                    marginBottom: 4,
+                  }}
+                >
+                  {t("suggestions.rationale")}
+                </div>
+                <div className="idm-code" style={{ maxHeight: 140, whiteSpace: "pre-wrap" }}>
+                  {selected.rationale}
+                </div>
               </div>
             )}
 
             <div>
-              <b>建议内容 (payload):</b>
-              <pre
+              <div
+                className="idm-fw-600"
                 style={{
-                  background: "#1f2937",
-                  color: "#e5e7eb",
-                  padding: 12,
-                  borderRadius: 6,
-                  marginTop: 4,
                   fontSize: 12,
-                  overflow: "auto",
-                  maxHeight: 220,
+                  color: "var(--idm-text-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                  marginBottom: 4,
                 }}
               >
+                {t("suggestions.payload")}
+              </div>
+              <pre className="idm-code idm-code--dark" style={{ maxHeight: 240 }}>
                 {JSON.stringify(selected.payload, null, 2)}
               </pre>
             </div>
 
-            {tab === "pending" && (
+            {tab === "pending" ? (
               <>
                 <div>
-                  <label style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>审核备注 (可选)</label>
-                  <textarea
+                  <label
+                    style={{
+                      display: "block",
+                      fontWeight: 600,
+                      fontSize: 12,
+                      marginBottom: 4,
+                      color: "var(--idm-text-muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: 0.5,
+                    }}
+                  >
+                    {t("suggestions.reviewNote")}
+                  </label>
+                  <Textarea
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
-                    rows={2}
-                    placeholder="例如: 同意 / 改用 'partial' 脱敏 / 已下线表, 不再治理"
-                    style={{
-                      width: "100%",
-                      fontFamily: "inherit",
-                      fontSize: 13,
-                      padding: 8,
-                      border: "1px solid #d9d9d9",
-                      borderRadius: 4,
-                    }}
+                    rows={3}
+                    placeholder={t("suggestions.reviewNotePlaceholder")}
+                    style={{ width: "100%" }}
                   />
                 </div>
 
-                <div style={{ display: "flex", gap: 8 }}>
-                  <Button onClick={handleApprove} variant="primary">
-                    批准 (写 KG)
+                <div className="idm-flex idm-gap-2 idm-justify-between" style={{ paddingTop: 12, borderTop: "1px solid var(--idm-border)" }}>
+                  <Button variant="ghost" onClick={() => setSelected(null)}>
+                    {t("common.cancel")}
                   </Button>
-                  <Button onClick={handleReject} variant="danger">
-                    拒绝
-                  </Button>
-                  <Button onClick={() => setSelected(null)} variant="ghost">
-                    取消
-                  </Button>
+                  <div className="idm-flex idm-gap-2">
+                    <Button onClick={handleReject} variant="danger">
+                      {t("suggestions.reject")}
+                    </Button>
+                    <Button onClick={handleApprove} variant="primary">
+                      {t("suggestions.approve")}
+                    </Button>
+                  </div>
                 </div>
               </>
-            )}
-
-            {tab !== "pending" && (
-              <div style={{ background: "#f7f8fa", padding: 10, borderRadius: 6, fontSize: 13 }}>
-                <b>审核结果:</b> {selected.status}
-                <br />
-                <b>审核时间:</b> {selected.reviewed_at ? new Date(selected.reviewed_at).toLocaleString() : "—"}
-                <br />
-                <b>备注:</b> {selected.review_note ?? "—"}
+            ) : (
+              <div className="idm-code" style={{ background: "var(--idm-gray-50)" }}>
+                <div>
+                  <b>{t("suggestions.reviewResult")}:</b>{" "}
+                  <Status kind={selected.status === "approved" ? "ok" : "fail"}>
+                    {selected.status}
+                  </Status>
+                </div>
+                <div>
+                  <b>{t("suggestions.reviewTime")}:</b>{" "}
+                  {selected.reviewed_at ? new Date(selected.reviewed_at).toLocaleString() : "—"}
+                </div>
+                <div>
+                  <b>{t("suggestions.reviewNote")}:</b> {selected.review_note ?? "—"}
+                </div>
               </div>
             )}
           </div>
@@ -269,37 +407,11 @@ function payloadSummary(payload: Record<string, unknown> | undefined): string {
   if (!payload) return "";
   if (typeof payload.description === "string") return payload.description.slice(0, 100);
   if (typeof payload.pii_class === "string")
-    return `${payload.column_name ?? ""} → ${payload.pii_class}` + (payload.masking_policy ? ` (mask=${payload.masking_policy})` : "");
+    return `${payload.column_name ?? ""} → ${payload.pii_class}` +
+      (payload.masking_policy ? ` (mask=${payload.masking_policy})` : "");
   if (typeof payload.tier === "string") return `tier=${payload.tier}`;
   const entries = Object.entries(payload).slice(0, 2);
-  return entries.map(([k, v]) => `${k}=${typeof v === "string" ? v.slice(0, 30) : JSON.stringify(v)}`).join(", ");
-}
-
-function Tabs({ value, onChange, stats }: { value: Tab; onChange: (t: Tab) => void; stats?: { pending: number; approved: number; rejected: number } }) {
-  const items: Array<{ k: Tab; label: string; color: string }> = [
-    { k: "pending", label: "待审核", color: "#fa8c16" },
-    { k: "approved", label: "已批准", color: "#52c41a" },
-    { k: "rejected", label: "已拒绝", color: "#999" },
-  ];
-  return (
-    <div style={{ display: "flex", gap: 4 }}>
-      {items.map((it) => (
-        <button
-          key={it.k}
-          onClick={() => onChange(it.k)}
-          style={{
-            padding: "4px 12px",
-            border: "1px solid " + (value === it.k ? it.color : "#d9d9d9"),
-            background: value === it.k ? it.color : "#fff",
-            color: value === it.k ? "#fff" : "#333",
-            borderRadius: 4,
-            cursor: "pointer",
-            fontSize: 13,
-          }}
-        >
-          {it.label} ({stats?.[it.k] ?? "…"})
-        </button>
-      ))}
-    </div>
-  );
+  return entries
+    .map(([k, v]) => `${k}=${typeof v === "string" ? v.slice(0, 30) : JSON.stringify(v)}`)
+    .join(", ");
 }

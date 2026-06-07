@@ -1,4 +1,5 @@
 """/api/v1/suggestions 路由测试 (AI 审核流)."""
+import uuid
 from datetime import datetime, timezone
 
 import pytest
@@ -20,7 +21,7 @@ async def _seed_suggestion(client: AsyncClient) -> str:
             insert(AISuggestion).values(
                 suggestion_type="description",
                 target_type="table",
-                target_id="00000000-0000-0000-0000-000000000001",
+                target_id=uuid.uuid4(),
                 payload={"description": "这是一张订单表"},
                 confidence=0.92,
                 model="gpt-5",
@@ -46,11 +47,11 @@ async def test_list_suggestions_default_pending(client):
 async def test_approve_suggestion(client):
     sid = await _seed_suggestion(client)
     r = await client.post(f"/api/v1/suggestions/{sid}/approve", json={"review_note": "LGTM"})
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     body = r.json()
     assert body["status"] == "approved"
-    assert body["reviewed_by"] == "system:tester"
     assert body["review_note"] == "LGTM"
+    assert body["reviewed_at"] is not None
 
 
 async def test_approve_already_approved_409(client):

@@ -1,0 +1,42 @@
+[
+  {
+    "skill": "classify_pii_columns",
+    "avg_score": 0.0,
+    "passed": 0,
+    "total": 3,
+    "result_json": "D:\\workspace\\github-ai\\idm\\apps\\api\\.tmp\\eval-test\\classify_pii_columns.result.json",
+    "report_md": "D:\\workspace\\github-ai\\idm\\apps\\api\\.tmp\\eval-test\\classify_pii_columns.report.md"
+  },
+  {
+    "skill": "detect_anomalies",
+    "avg_score": 0.0,
+    "passed": 0,
+    "total": 2,
+    "result_json": "D:\\workspace\\github-ai\\idm\\apps\\api\\.tmp\\eval-test\\detect_anomalies.result.json",
+    "report_md": "D:\\workspace\\github-ai\\idm\\apps\\api\\.tmp\\eval-test\\detect_anomalies.report.md"
+  },
+  {
+    "skill": "infer_table_description",
+    "avg_score": 0.0,
+    "passed": 0,
+    "total": 3,
+    "result_json": "D:\\workspace\\github-ai\\idm\\apps\\api\\.tmp\\eval-test\\infer_table_description.result.json",
+    "report_md": "D:\\workspace\\github-ai\\idm\\apps\\api\\.tmp\\eval-test\\infer_table_description.report.md"
+  },
+  {
+    "skill": "infer_table_owners",
+    "avg_score": 0.0,
+    "passed": 0,
+    "total": 2,
+    "result_json": "D:\\workspace\\github-ai\\idm\\apps\\api\\.tmp\\eval-test\\infer_table_owners.result.json",
+    "report_md": "D:\\workspace\\github-ai\\idm\\apps\\api\\.tmp\\eval-test\\infer_table_owners.report.md"
+  },
+  {
+    "skill": "nl2sql",
+    "avg_score": 0.0,
+    "passed": 0,
+    "total": 3,
+    "result_json": "D:\\workspace\\github-ai\\idm\\apps\\api\\.tmp\\eval-test\\nl2sql.result.json",
+    "report_md": "D:\\workspace\\github-ai\\idm\\apps\\api\\.tmp\\eval-test\\nl2sql.report.md"
+  }
+]

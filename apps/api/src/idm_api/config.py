@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     mcp_gcs_transport: str = "stdio"
     mcp_slack_bot_token: str = ""
 
+    # === Superset ===
+    superset_url: str = "http://localhost:8088"
+    superset_username: str = "admin"
+    superset_password: str = "admin"
+    superset_verify_ssl: bool = False
+
     # === GCS / Storage ===
     gcs_bucket_idm: str = "idm-artifacts-local"
     google_application_credentials: str = ""

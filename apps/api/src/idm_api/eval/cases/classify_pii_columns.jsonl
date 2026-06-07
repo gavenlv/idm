@@ -1,0 +1,3 @@
+{"id":"email-1","skill":"classify_pii_columns","input":{"columns":[{"name":"user_email","type":"String"},{"name":"order_id","type":"String"}],"sample":[{"user_email":"a@b.com","order_id":"O1"}]},"gold":{"contains":["email","user_email"]},"tags":["smoke"]}
+{"id":"phone-1","skill":"classify_pii_columns","input":{"columns":[{"name":"mobile","type":"String"},{"name":"created_at","type":"DateTime"}],"sample":[]},"gold":{"contains":["phone","mobile"]},"tags":["phone"]}
+{"id":"id-card-1","skill":"classify_pii_columns","input":{"columns":[{"name":"id_card_no","type":"String"}],"sample":[]},"gold":{"contains":["id_card"]},"tags":["id-card"]}

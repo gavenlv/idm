@@ -1,4 +1,4 @@
-# IDM — Insight 决策与告警设计
+﻿# IDM — Insight 决策与告警设计
 
 > 把"AI 发现的洞察"变成"业务能行动的信号"
 > 包含：Insight 分类、决策规则、降噪、多渠道推送、行动闭环、SLO
@@ -111,7 +111,7 @@ policies:
 # idm/insight/decision.py
 async def decide_hypothesis(ctx: dict) -> str:
     return await llm.complete(
-        model="deepseek-reasoner",   # 复杂归因
+        model="gpt-5",   # 复杂归因
         messages=[
             {"role":"system","content": HYP_SYS},
             {"role":"user",   "content": render(ctx)}
@@ -282,7 +282,7 @@ mcp_calls:
     args: { sql: "SELECT * FROM asset WHERE fqn = ANY(SELECT DISTINCT jsonb_path_query(targets, '$.fqn') FROM insight WHERE id = ANY({{ input.insight_ids }}))" }
 llm_calls:
   - name: compose
-    model: deepseek-v3
+    model: deepseek-v4
     prompt: |
       把以下 insight 渲染为 {{ input.style }} 的 {{ input.language }} 消息:
       {{ steps.get_insights.result }}
@@ -330,7 +330,7 @@ mcp_calls:
       for_each: "{{ input.metrics }}"
 llm_calls:
   - name: detect
-    model: deepseek-reasoner
+    model: gpt-5
     for_each: "{{ steps.profile.result }}"
     prompt: |
       你看以下时序数据 (30 天, 最近 1 天为 today).

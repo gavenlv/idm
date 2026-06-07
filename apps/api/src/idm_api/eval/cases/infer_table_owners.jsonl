@@ -1,0 +1,2 @@
+{"id":"owner-shop-1","skill":"infer_table_owners","input":{"service":"mock-svc","apply":false,"llm_threshold":0.5},"gold":{"contains":["email","owner"]},"tags":["smoke"]}
+{"id":"owner-fct-1","skill":"infer_table_owners","input":{"service":"mock-svc","fqn_pattern":"fct_","apply":false,"llm_threshold":0.5},"gold":{"contains":["email","data"]},"tags":["team-mapping"]}

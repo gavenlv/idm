@@ -51,7 +51,7 @@ sequenceDiagram
     participant CR as ChatBIAgent
     participant RET as Retriever
     participant EL as EntityLinker
-    participant NL as NL2SQL (gpt-5)
+    participant NL as NL2SQL (gpt-5 强推理)
     participant EX as Executor (受限)
     participant CH as ClickHouse MCP
     participant VIS as ChartPicker

@@ -1,9 +1,9 @@
-# IDM — 多 Agent 编排设计
+﻿# IDM — 多 Agent 编排设计
 
 > Agent 是「知道要做什么」的决策者
 > Skill 是「具体怎么把一件事做对」的执行单元
 > Use Case YAML 是「告诉 Agent 要管什么」的唯一入口
-> 本文给出 1 个 Planner + 8 个 Specialist 的协作图、状态机、失败恢复
+> 本文给出 1 个 Planner + 9 个 Specialist 的协作图、状态机、失败恢复
 
 ---
 
@@ -45,17 +45,18 @@
 
 | # | Agent | 输入 | 输出（写入 KG） | 主要 LLM |
 | --- | --- | --- | --- | --- |
-| 1 | **Planner** | Use Case YAML + KG 状态 | DAG of (agent, skill) | gpt-5 (强推理) |
-| 2 | **SchemaAgent** | MCP 数据源 (CH / PG / Trino) | `Table`, `Column`, `Database` | deepseek-v3 |
-| 3 | **LineageAgent** | dbt manifest / Airflow DAG / Superset Export / SQL | `UPSTREAM`, `DOWNSTREAM`, `REFERENCED_BY` | deepseek-v3 + sqlglot |
-| 4 | **DocAgent** | Table + sample + 业务术语 | `description`, `glossary_binding` | gpt-5 |
-| 5 | **PIIAgent** | Column meta + sample + regex | `pii_class`, `masking_policy` | gpt-5 |
-| 6 | **OwnerAgent** | git blame + dbt meta + airflow owner + query log | `owner`, `steward`, `consumer` | gpt-5 |
-| 7 | **QualityAgent** | 30 天画像 + LLM 推理 | `anomaly_event`, `metric_baseline` | deepseek-reasoner (R1) |
-| 8 | **InsightAgent** | anomaly / 新建资产 / 缺失 owner 等 | `insight` + channel push | gpt-5 |
-| 9 | **ChatBIAgent** | 自然语言问题 + schema + 历史 | `sql` + `result` + `chart` | gpt-5 |
+| 1 | **Planner** | Use Case YAML + KG 状态 | DAG of (agent, skill) | deepseek-v4 (主力) |
+| 2 | **SchemaAgent** | MCP 数据源 (CH / PG / Trino) | `Table`, `Column`, `Database` | deepseek-v4 |
+| 3 | **LineageAgent** | dbt manifest / Airflow DAG / Superset Export / SQL | `UPSTREAM`, `DOWNSTREAM`, `REFERENCED_BY` | deepseek-v4 + sqlglot |
+| 4 | **DocAgent** | Table + sample + 业务术语 | `description`, `glossary_binding` | deepseek-v4 |
+| 5 | **PIIAgent** | Column meta + sample + regex | `pii_class`, `masking_policy` | deepseek-v4 (PII 列先 mask) |
+| 6 | **OwnerAgent** | git blame + dbt meta + airflow owner + query log | `owner`, `steward`, `consumer` | deepseek-v4 |
+| 7 | **QualityAgent** | 30 天画像 + LLM 推理 | `anomaly_event`, `metric_baseline` | gpt-5 (复杂归因) |
+| 8 | **InsightAgent** | anomaly / 新建资产 / 缺失 owner 等 | `insight` + channel push | deepseek-v4 |
+| 9 | **ChatBIAgent** | 自然语言问题 + schema + 历史 | `sql` + `result` + `chart` | gpt-5 (NL2SQL 强推理) |
+| 10 | **GlossaryAgent** | schema + 列名 + 业务文档 | `glossary_term`, `term_binding` | deepseek-v4 |
 
-> Planner 用 gpt-5 (强规划); 批量 / 长文 / 成本敏感任务用 deepseek-v3; 复杂异常归因用 deepseek-reasoner。
+> Planner 用 deepseek-v4 (主力); 复杂异常归因 / NL2SQL 强推理用 gpt-5; 批量 / 长文 / 中文默认走 deepseek-v4。
 
 ---
 
@@ -199,7 +200,7 @@ class Planner:
 
         prompt = self._build_prompt(use_case, snap, diff)
         resp = await self.llm.complete(
-            model="gpt-5",
+            model="deepseek-v4",
             messages=[
                 {"role": "system", "content": PLANNER_SYS},
                 {"role": "user",   "content": prompt}
@@ -530,8 +531,8 @@ flowchart TB
     S3 --> L1[LLM: gpt-5]
     S4 --> L1
     S5 --> L1
-    S6 --> L2[LLM: deepseek-reasoner]
-    S7 --> L3[LLM: deepseek-v3]
+    S6 --> L2[LLM: gpt-5]
+    S7 --> L3[LLM: deepseek-v4]
     A1 -.commit.-> KG[(Knowledge Graph)]
     A2 -.commit.-> KG
     A3 -.commit.-> KG

@@ -100,6 +100,7 @@ class EvalReport(BaseModel):
 # idm/eval/runner.py
 class SkillEvalRunner:
     def __init__(self, skill: str, model: str | None = None, judge_model: str = "gpt-5"):
+        # judge_model 默认 gpt-5 (评分需要强推理); model 走默认 deepseek-v4
         self.skill = skill
         self.model = model
         self.judge_model = judge_model
@@ -421,6 +422,11 @@ flowchart LR
 python -m idm.eval.cli run --all --model gpt-5.4 --baseline gpt-5 --gate
 # 自动产出 diff report
 # 若通过, 自动推 staging 配置
+```
+
+```bash
+# 验证 deepseek-v4 (主力) baseline
+python -m idm.eval.cli run --all --model deepseek-v4 --baseline gpt-5 --gate
 ```
 
 **预算门禁**: 若新模型 cost > 1.5x 老模型, 强制要求新模型 avg_score > 老模型 + 0.05 才放行。

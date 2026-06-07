@@ -1,4 +1,4 @@
-# IDM — AI 驱动的核心设计
+﻿# IDM — AI 驱动的核心设计
 
 > 📌 **实现前先读**: [AGENT_INSTRUCTIONS.md](../AGENT_INSTRUCTIONS.md) — 宪法级摘要, 含 5 大原则 / 1+9 Agent / Skill 规范 / 5 大绝对不能做 / 关键 ADR。
 
@@ -84,7 +84,7 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    subgraph "Planner (gpt-5)"
+    subgraph "Planner (deepseek-v4)"
         P[Planner Agent<br/>Use Case → DAG]
     end
 
@@ -143,7 +143,7 @@ sequenceDiagram
     participant KE as Knowledge Engine
     participant A as Doc Agent
     participant SK as Skill Runner
-    participant L as LLM (gpt-5)
+    participant L as LLM (deepseek-v4)
     participant H as 人工
     participant KG as 知识图谱
 
@@ -507,7 +507,7 @@ sequenceDiagram
 | Memory | Redis (短期) + PG (长期, 写入 KG) |
 | 评估 | Promptfoo + 自研 Eval Harness |
 | 监控 | Langfuse (LLM Traces) |
-| 模型 | **GPT-5 主力 + DeepSeek V3/R1 备选 + Qwen2.5 32B 本地兜底** (经 LiteLLM 统一路由) |
+| 模型 | **DeepSeek V4 主力 + GPT-5 备选** (经 LiteLLM 统一路由; PII 一律先 mask 再送 v4) |
 
 ## 附录 B. 关键 Prompt 模板
 

@@ -1,0 +1,1 @@
+{"name":"nl2sql","inputs":{"question":"查 orders_daily 表最近 3 行的 id 和 total_amount","service":"clickhouse-prod","dry_run":true,"max_rows":3}}

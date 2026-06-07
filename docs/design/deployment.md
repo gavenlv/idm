@@ -1,4 +1,4 @@
-# IDM — 部署架构 (GKE + GCE ClickHouse)
+﻿# IDM — 部署架构 (GKE + GCE ClickHouse)
 
 > 📌 **实现前先读**: [AGENT_INSTRUCTIONS.md](../AGENT_INSTRUCTIONS.md) §10 (部署) — GKE 命名空间 / ClickHouse GCE / Secret / GitOps。
 
@@ -365,7 +365,7 @@ conditions:
 | Pub/Sub | 1 GB/日 | ~$5 |
 | Memorystore Redis HA | 2 GB | ~$80 |
 | GCS (1 TB) | Standard | ~$25 |
-| LLM (GPT-5 主力 + DeepSeek 备选 + Qwen 本地) | 1M tokens/日 | ~$300 |
+| LLM (DeepSeek V4 主力 + GPT-5 备选) | 1M tokens/日 | ~$300 |
 | Cloud Build / 分钟 | - | ~$50 |
 | Cloud Logging (50 GB) | - | ~$25 |
 | **合计** | - | **~$2,600/月** |

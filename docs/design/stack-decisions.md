@@ -1,9 +1,9 @@
-# IDM — 技术选型决策 v2 (LLM / 前端 / Skills)
+﻿# IDM — 技术选型决策 v2 (LLM / 前端 / Skills)
 
 > 📌 **实现前先读**: [AGENT_INSTRUCTIONS.md](../AGENT_INSTRUCTIONS.md) — 选型总览 + 关键 ADR。
 
 > 落地决策一次说清
-> 1) LLM 主力：**GPT-5** + 备选 **DeepSeek**，本地兜底
+> 1) LLM 主力：**DeepSeek V4** + 备选 **GPT-5**（**仅 2 个生产模型**）
 > 2) 前端：放弃 Antd，**ag-grid Community** + 公司 UX 体系
 > 3) **Skills 体系** 保证执行稳定性 (类似 Claude Skills / OpenAI Skills)
 > 4) MCP 负责连通所有外部服务
@@ -12,7 +12,7 @@
 
 ## 目录
 
-- [1. LLM 路由：GPT-5 + DeepSeek + 本地](#1-llm-路由gpt-5--deepseek--本地)
+- [1. LLM 路由：DeepSeek V4 + GPT-5](#1-llm-路由deepseek-v4--gpt-5)
 - [2. 前端：ag-grid Community + 公司 UX](#2-前端ag-grid-community--公司-ux)
 - [3. Skills 体系：执行稳定性的核心保障](#3-skills-体系执行稳定性的核心保障)
 - [4. MCP 适配层：连接一切](#4-mcp-适配层连接一切)
@@ -21,74 +21,66 @@
 
 ---
 
-## 1. LLM 路由：GPT-5 + DeepSeek + 本地
+## 1. LLM 路由：DeepSeek V4 + GPT-5
 
-### 1.1 三层 LLM 矩阵
+### 1.1 双模型矩阵
 
 ```mermaid
 flowchart LR
-    subgraph L1[主力层 - 云端]
-        A1[GPT-5<br/>主力推理]
+    subgraph L1[主力 - DeepSeek V4]
+        A1[DeepSeek V4<br/>中文 / 长文 / 文档 / 推断 / 批量]
     end
-    subgraph L2[备选层 - 性价比]
-        B1[DeepSeek V3 / R1<br/>中文 / 代码 / 长上下文]
+    subgraph L2[备选 - GPT-5]
+        B1[GPT-5<br/>复杂推理 / 代码 / 高质量英文]
     end
-    subgraph L3[兜底层 - 离线]
-        C1[Qwen2.5 32B (本地 Ollama)<br/>合规 / 内网]
-    end
-
     R[LLM Router] --> A1
     R --> B1
-    R --> C1
-    style A1 fill:#7AB8FF
-    style B1 fill:#FFB454
-    style C1 fill:#B0E07B
+    style A1 fill:#FFB454
+    style B1 fill:#7AB8FF
 ```
+
+> **本版本仅支持 2 个生产模型**：DeepSeek V4 + GPT-5。
+> 历史模型（DeepSeek V3 / R1 / Qwen 本地）已下线，不再维护。
 
 ### 1.2 路由策略
 
 | 任务类型 | 首选 | 备选 | 理由 |
 | --- | --- | --- | --- |
-| **Doc 生成 (高质量中文)** | GPT-5 | DeepSeek V3 | GPT-5 写作自然 |
-| **SQL 生成 / 代码理解** | GPT-5 | DeepSeek V3 / R1 | GPT-5 推理强 |
-| **PII 分类 / 命名实体** | GPT-5 | DeepSeek V3 |  |
-| **大文档摘要 (50k+)** | DeepSeek V3 (long ctx) | GPT-5 | 性价比高 |
-| **Embedding** | text-embedding-3-large | bge-large-zh (本地) |  |
-| **合规 / 内网数据** | Qwen2.5 32B 本地 | - | 数据不出网 |
-| **批量回填 (>1k calls)** | DeepSeek V3 | Qwen2.5 本地 | 成本控制 |
-| **失败兜底** | 任意可用 | - | 保证可用性 |
+| **Doc 生成 (高质量中文)** | DeepSeek V4 | GPT-5 | V4 中文写作自然，成本低 |
+| **NL2SQL / ChatBI** | DeepSeek V4 | GPT-5 | V4 中文 + 性价比 |
+| **PII 分类 / 命名实体** | DeepSeek V4 | GPT-5 | |
+| **复杂推理 / 数学 / Code Review (PR)** | GPT-5 | DeepSeek V4 | GPT-5 推理强 |
+| **大文档摘要 (50k+)** | DeepSeek V4 (long ctx) | GPT-5 | 性价比高 |
+| **Embedding** | text-embedding-3-large | bge-large-zh (本地) | |
+| **批量回填 (>1k calls)** | DeepSeek V4 | GPT-5 | 成本控制 |
+| **失败兜底** | 另一可用 | - | 保证可用性 |
 
 ### 1.3 LiteLLM 配置
 
 ```yaml
 # config/llm_router.yaml
 model_list:
-  - model_name: gpt-5
-    litellm_params:
-      model: openai/gpt-5
-      api_key: os.environ/OPENAI_API_KEY
-      timeout: 60
-  - model_name: deepseek-v3
+  - model_name: deepseek-v4
     litellm_params:
       model: deepseek/deepseek-chat
       api_key: os.environ/DEEPSEEK_API_KEY
       api_base: https://api.deepseek.com
       timeout: 60
-  - model_name: qwen-local
+  - model_name: gpt-5
     litellm_params:
-      model: ollama/qwen2.5:32b
-      api_base: http://ollama.idm.svc:11434
-      timeout: 120
+      model: openai/gpt-5
+      api_key: os.environ/OPENAI_API_KEY
+      timeout: 60
 
 router_settings:
   routing_strategy: simple-shuffle
   num_retries: 3
   timeout: 60
   fallbacks:
-    - { gpt-5: [deepseek-v3, qwen-local] }
-    - { deepseek-v3: [qwen-local, gpt-5] }
+    - { deepseek-v4: [gpt-5] }
+    - { gpt-5: [deepseek-v4] }
   context_window_fallbacks:
-    - { gpt-5: [deepseek-v3] }
+    - { gpt-5: [deepseek-v4] }
 
 litellm_settings:
   drop_params: true
@@ -103,15 +95,21 @@ from idm.llm import LLM
 
 class DocAgent:
     def __init__(self):
-        self.llm = LLM(default="gpt-5",
-                       long_ctx="deepseek-v3",
-                       private="qwen-local")
+        self.llm = LLM(default="deepseek-v4",
+                       long_ctx="deepseek-v4",
+                       reasoning="gpt-5")
 
-    async def generate(self, prompt: str, ctx_tokens: int = 0):
+    async def generate(self, prompt: str, ctx_tokens: int = 0, requires_reasoning: bool = False):
         # 智能选模型
-        model = "deepseek-v3" if ctx_tokens > 60_000 else "gpt-5"
+        if requires_reasoning:
+            model = "gpt-5"
+        elif ctx_tokens > 60_000:
+            model = "deepseek-v4"
+        else:
+            model = "deepseek-v4"
         if self.use_case.has_sensitive_data:
-            model = "qwen-local"
+            # PII: 仍走 deepseek-v4, 但先 mask
+            prompt = self._mask_pii(prompt)
         return await self.llm.chat(model=model, messages=prompt)
 ```
 
@@ -484,7 +482,7 @@ spec:
 | --- | --- |
 | **后端框架** | FastAPI + Pydantic v2 (不变) |
 | **任务编排** | LangGraph + 自研 Skill Runner |
-| **LLM 网关** | LiteLLM (统一 GPT-5 / DeepSeek / Ollama) |
+| **LLM 网关** | LiteLLM (统一 DeepSeek V4 / GPT-5) |
 | **LLM 可观测** | Langfuse (自托管) |
 | **Embedding** | OpenAI text-embedding-3-large + bge-large-zh (本地) |
 | **图存储** | PostgreSQL + Apache AGE (不变) |
@@ -506,7 +504,7 @@ spec:
 ## 6. 与之前文档的关系
 
 - [mcp-first-architecture.md](./mcp-first-architecture.md) → 主架构
-  - **更新**：LLM 路由从最初规划的 Vertex AI 改为 **GPT-5 主力 + DeepSeek V3 备选 + Qwen2.5 本地兜底**
+  - **更新**：LLM 路由从最初规划的 Vertex AI 改为 **DeepSeek V4 主力 + GPT-5 备选**（2 模型版本，2026-06）
   - **更新**：前端 Antd 改为 ag-grid + IDM UI Kit
   - **新增**：Skills 体系 (Agent → Skill → MCP)
 - [use-case-spec.md](./use-case-spec.md) → YAML 规范 (不变)

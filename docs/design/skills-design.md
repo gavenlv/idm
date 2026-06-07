@@ -1,4 +1,4 @@
-# IDM — Skills 体系设计
+﻿# IDM — Skills 体系设计
 
 > Skills 是 IDM 的**执行原子**
 > Agent 用 Skills 组合业务，LLM 用 Skills 输出稳定结果
@@ -180,8 +180,8 @@ llm_calls:
   - name: infer_description
     for_each: "{{ steps.show_tables.result }}"
     when: "{{ steps.describe_table.results[item].columns | length > 0 }}"
-    model: gpt-5                      # 默认走 LiteLLM 路由
-    fallback_models: [deepseek-v3, qwen-local]
+    model: deepseek-v4                # 默认走 LiteLLM 路由 (主力)
+    fallback_models: [gpt-5]
     prompt: |
       你是资深数据工程师. 为表 "{{ item }}" 写一段不超过 60 字的中文业务描述.
       Schema: {{ steps.describe_table.results[item].columns }}
@@ -405,7 +405,7 @@ async def run_use_case(uc):
 
 | 失败 | 处理 |
 | --- | --- |
-| **单次 LLM 失败** | 自动 fallback (GPT-5 → DeepSeek → Qwen) |
+| **单次 LLM 失败** | 自动 fallback (GPT-5 → DeepSeek → deepseek-v4) |
 | **MCP 工具不可用** | 跳过该步骤, 记录 warning, 继续 |
 | **校验失败 (error)** | 整体标记 partial_success, 不写 KG, 进告警 |
 | **校验失败 (warning)** | 写 KG, 但在 UI 显示 ⚠️ |

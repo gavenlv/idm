@@ -1,4 +1,4 @@
 """Routers package."""
-from idm_api.routers import assets, health, services, skills, suggestions
+from idm_api.routers import assets, health, owners, services, skills, suggestions
 
-__all__ = ["assets", "health", "services", "skills", "suggestions"]
+__all__ = ["assets", "health", "owners", "services", "skills", "suggestions"]

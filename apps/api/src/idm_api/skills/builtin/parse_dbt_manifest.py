@@ -37,6 +37,7 @@ from idm_kg.models.database import Database
 from idm_kg.models.schema import Schema
 from idm_kg.models.service import Service
 from idm_kg.models.table_asset import TableAsset
+from idm_kg.models.table_lineage import TableLineage
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +151,13 @@ async def parse_dbt_manifest(ctx: SkillContext, **inputs: Any) -> SkillResult:
     total_deps = 0
     skipped = 0
     created = updated = 0
+    lineage_edges_added = 0
+    lineage_edges_skipped = 0
+
+    # unique_id -> fqn 映射 (解析完所有节点后用于建血缘)
+    fqn_by_uid: dict[str, str] = {}
+    # 记录每个 entry 的 table_id, 方便后面回填
+    fqn_to_table_id: dict[str, str] = {}
 
     # 1) 处理 sources
     if "source" in include_resource_types:
@@ -317,6 +325,8 @@ async def parse_dbt_manifest(ctx: SkillContext, **inputs: Any) -> SkillResult:
         "tables_updated": updated,
         "skipped_no_name": skipped,
         "total_depends_on_edges": total_deps,
+        "lineage_edges_added": lineage_edges_added,
+        "lineage_edges_skipped": lineage_edges_skipped,
         "items_total": len(items),
     }
     ctx.log("done", **summary)
