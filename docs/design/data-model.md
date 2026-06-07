@@ -1,5 +1,7 @@
 # IDM — 数据模型与知识图谱设计
 
+> 📌 **实现前先读**: [AGENT_INSTRUCTIONS.md](../AGENT_INSTRUCTIONS.md) §7 (知识图谱) — 三层架构 / 关键表 / 命名约定。
+
 > IDM 的「数据大脑」由三层组成：
 > **1) 关系型事实层 (PostgreSQL)** — 资产 / 标签 / 血缘 / 审计
 > **2) 图查询层 (PostgreSQL + Apache AGE)** — 关系遍历 / 影响分析

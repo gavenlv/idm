@@ -1,5 +1,7 @@
 # IDM — 部署架构 (GKE + GCE ClickHouse)
 
+> 📌 **实现前先读**: [AGENT_INSTRUCTIONS.md](../AGENT_INSTRUCTIONS.md) §10 (部署) — GKE 命名空间 / ClickHouse GCE / Secret / GitOps。
+
 > IDM 全部服务跑在 **GKE**，**ClickHouse** 保留在 **GCE**（性能/磁盘选择更灵活）
 > CI/CD 走 **Cloud Build → Artifact Registry → ArgoCD (GitOps)**
 > 监控 **Cloud Monitoring + Cloud Logging + OpenTelemetry**
@@ -256,7 +258,7 @@ flowchart LR
 | --- | --- | --- |
 | `idm-api` | `idm-api@project.iam` | cloudsql.client, secretmanager.secretAccessor, pubsub.publisher |
 | `idm-obs` | `idm-obs@project.iam` | pubsub.publisher, storage.objectCreator |
-| `idm-ai` | `idm-ai@project.iam` | aiplatform.user (Vertex) |
+| `idm-ai` | `idm-ai@project.iam` | secretmanager.secretAccessor (LLM API Key 由 Secret Manager 统一托管, LiteLLM 经内部 Service 调用) |
 | `idm-cron` | `idm-cron@project.iam` | cloudsql.client, pubsub.subscriber |
 
 ---
@@ -363,7 +365,7 @@ conditions:
 | Pub/Sub | 1 GB/日 | ~$5 |
 | Memorystore Redis HA | 2 GB | ~$80 |
 | GCS (1 TB) | Standard | ~$25 |
-| LLM (Vertex AI) | 1M tokens/日 | ~$300 |
+| LLM (GPT-5 主力 + DeepSeek 备选 + Qwen 本地) | 1M tokens/日 | ~$300 |
 | Cloud Build / 分钟 | - | ~$50 |
 | Cloud Logging (50 GB) | - | ~$25 |
 | **合计** | - | **~$2,600/月** |

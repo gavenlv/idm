@@ -1,0 +1,50 @@
+/**
+ * IDM UI Kit — Global Styles
+ * 占位最小样式, 后续接公司 Design Token (颜色 / 间距 / 字号)。
+ */
+:root {
+  --idm-color-primary: #1f6feb;
+  --idm-color-text: #1a1a1a;
+  --idm-color-text-muted: #6a6a6a;
+  --idm-color-border: #e5e5e5;
+  --idm-color-bg: #ffffff;
+  --idm-color-bg-alt: #f7f8fa;
+  --idm-radius: 6px;
+  --idm-spacing: 12px;
+  --idm-font-size: 14px;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; font-size: var(--idm-font-size); color: var(--idm-color-text); background: var(--idm-color-bg-alt); }
+
+.idm-app { min-height: 100vh; display: flex; flex-direction: column; }
+.idm-header { display: flex; align-items: center; gap: 24px; padding: 12px 24px; background: var(--idm-color-bg); border-bottom: 1px solid var(--idm-color-border); }
+.idm-title { margin: 0; font-size: 18px; }
+.idm-nav { display: flex; gap: 16px; }
+.idm-nav a { color: var(--idm-color-text-muted); text-decoration: none; }
+.idm-nav a:hover { color: var(--idm-color-primary); }
+.idm-main { flex: 1; padding: 24px; }
+
+.idm-card { background: var(--idm-color-bg); border: 1px solid var(--idm-color-border); border-radius: var(--idm-radius); margin-bottom: var(--idm-spacing); }
+.idm-card__header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--idm-color-border); }
+.idm-card__title { font-weight: 600; }
+.idm-card__body { padding: 16px; }
+
+.idm-btn { border: 1px solid var(--idm-color-border); background: var(--idm-color-bg); border-radius: var(--idm-radius); padding: 6px 12px; cursor: pointer; font-size: var(--idm-font-size); }
+.idm-btn--primary { background: var(--idm-color-primary); color: #fff; border-color: var(--idm-color-primary); }
+.idm-btn--secondary { background: var(--idm-color-bg); }
+.idm-btn--danger { background: #d4380d; color: #fff; border-color: #d4380d; }
+.idm-btn--ghost { background: transparent; border-color: transparent; }
+.idm-btn--sm { padding: 4px 8px; font-size: 12px; }
+.idm-btn--md { padding: 6px 12px; }
+.idm-btn--lg { padding: 8px 16px; font-size: 16px; }
+.idm-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.idm-tag { display: inline-block; padding: 1px 8px; border: 1px solid; border-radius: 10px; font-size: 12px; background: transparent; }
+
+.idm-drawer__mask { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 99; }
+.idm-drawer { position: fixed; top: 0; right: 0; bottom: 0; background: var(--idm-color-bg); z-index: 100; box-shadow: -2px 0 8px rgba(0,0,0,0.15); display: flex; flex-direction: column; }
+.idm-drawer__header { padding: 16px; border-bottom: 1px solid var(--idm-color-border); font-weight: 600; }
+.idm-drawer__body { flex: 1; padding: 16px; overflow: auto; }
+
+.ag-theme-quartz { --ag-font-size: 13px; }

@@ -1,0 +1,116 @@
+# 第一个 Use Case 模板
+# 见 docs/design/use-case-spec.md
+id: shop-orders-daily
+version: 1
+description: 订单宽表治理 — 自动发现 / 血缘 / 文档 / PII / Owner / 质量
+owners:
+  - alice@example.com
+  - data-platform@example.com
+
+# === 数据源 (MCP-First, 业务 0 改动) ===
+sources:
+  - id: ch-prod
+    type: clickhouse
+    mcp: clickhouse
+    config:
+      host: ch.example.com
+      database: shop
+    scope:
+      include_tables: ["orders_daily", "orders_daily_v2"]
+      exclude_tables: ["orders_temp_*"]
+
+  - id: gh-warehouse
+    type: github
+    mcp: github
+    config:
+      repo: company/dwh
+      branch: main
+    scope:
+      paths:
+        - "dags/etl_orders*"
+        - "models/orders_*"
+        - "tests/orders_*.yml"
+
+  - id: sp-export
+    type: superset_export
+    mcp: file  # 自研 file MCP, 读 GCS 上的 zip
+    config:
+      path: gs://superset-exports/2025/
+    scope:
+      dashboard_keywords: ["订单", "orders"]
+
+  - id: af-dags
+    type: airflow
+    mcp: airflow
+    config:
+      base_url: https://airflow.example.com
+      auth: pat
+    scope:
+      dag_id_pattern: "etl_orders_.*"
+
+# === 业务上下文 (LLM 推理用) ===
+context:
+  glossary:
+    - term: GMV
+      definition: 成交总额, 包含退款前金额
+    - term: AOV
+      definition: 平均订单金额 = GMV / 订单数
+  tags: [sales, tier-1, finance-sensitive]
+  tier: critical
+
+# === 分析任务 (Planner 拆 DAG) ===
+analysis:
+  - id: discover
+    task: discover_assets
+    agent: schema
+    uses: [ch-prod]
+
+  - id: lineage
+    task: extract_lineage
+    agent: lineage
+    uses: [ch-prod, gh-warehouse, sp-export, af-dags]
+    depends_on: [discover]
+
+  - id: doc
+    task: generate_docs
+    agent: doc
+    uses: [ch-prod, gh-warehouse]
+    depends_on: [discover]
+
+  - id: pii
+    task: classify_pii
+    agent: pii
+    uses: [ch-prod]
+    depends_on: [discover]
+    options:
+      # PII 强制走本地 (合规)
+      force_local_model: true
+
+  - id: owner
+    task: suggest_owners
+    agent: owner
+    uses: [gh-warehouse, af-dags]
+    depends_on: [discover]
+
+  - id: quality
+    task: detect_anomalies
+    agent: quality
+    schedule: "0 9 * * *"   # 每天 9 点
+    uses: [ch-prod]
+    depends_on: [discover]
+
+# === 交付 ===
+deliverables:
+  knowledge_graph:
+    entities: [table, column, pipeline, dashboard]
+  insights:
+    - channel: slack
+      target: "#data-stewards"
+      trigger: [anomaly_detected, pii_unmasked, owner_missing]
+      severity_filter: [warning, critical]
+    - channel: jira
+      trigger: [pii_unmasked]
+      assignee_role: secops
+  api_expose: true
+  console:
+    home_widgets: [tier1_health, recent_anomalies, missing_owners]

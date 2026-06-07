@@ -1,8 +1,10 @@
 # IDM — AI 驱动的核心设计
 
+> 📌 **实现前先读**: [AGENT_INSTRUCTIONS.md](../AGENT_INSTRUCTIONS.md) — 宪法级摘要, 含 5 大原则 / 1+9 Agent / Skill 规范 / 5 大绝对不能做 / 关键 ADR。
+
 > 解决一个根本问题：
 > **传统元数据平台为何 80% 时间在做 Connector 适配，而数据团队仍然得不到一个真正可用的「数据大脑」？**
-> 本文给出 IDM 的回答：**让 LLM 主动观察 + 主动理解 + 主动建议**。
+> 本文给出 IDM 的回答：**MCP-First 零侵入 + LLM 主动观察 + LLM 主动理解 + LLM 主动建议 + Skills 稳定执行**。
 
 ---
 
@@ -10,8 +12,8 @@
 
 - [1. 传统元数据平台为何失效](#1-传统元数据平台为何失效)
 - [2. AI 驱动的核心思想](#2-ai-驱动的核心思想)
-- [3. 五大核心 Agent 设计](#3-五大核心-agent-设计)
-- [4. Observe, Don't Integrate：观察层设计](#4-observe-dont-integrate观察层设计)
+- [3. 核心 Agent 设计 (1+9 模式)](#3-核心-agent-设计-19-模式)
+- [4. Zero-Touch: MCP 观察层](#4-zero-touch-mcp-观察层)
 - [5. Schema-as-Prompt：让 LLM 理解资产](#5-schema-as-prompt让-llm-理解资产)
 - [6. 知识图谱与 LLM 的双向循环](#6-知识图谱与-llm-的双向循环)
 - [7. NL2SQL：安全 + 智能的查询代理](#7-nl2sql安全--智能的查询代理)
@@ -60,50 +62,72 @@ flowchart LR
 
 | 传统 | IDM |
 | --- | --- |
-| 业务系统主动 push | IDM **主动观察** |
+| 业务系统主动 push | IDM **MCP 主动观察** (零侵入) |
 | 结构化 ETL | LLM **实时理解** |
 | 人工补 Description | Agent **主动建议** |
 | 静态目录 | **主动 Insight** 推送 |
+| 写 Connector | 自建 MCP Server 5~50 行 |
 
-### 2.2 三大设计原则
+### 2.2 五大设计原则
 
-1. **Observe, Don't Integrate** — 零/少侵入，旁路采集
-2. **AI in the Loop, Human in the Lead** — LLM 先做，人审核；不替代人
-3. **Schema-as-Prompt** — 把知识图谱当作 LLM 的「长期记忆」
+1. **MCP-First, Zero-Touch** — 零侵入, 标准协议, IDM 是 MCP Client
+2. **UseCase-as-Config** — 业务团队只交付 1 份 YAML
+3. **Agent-Orchestrated** — 1 Planner + 9 Specialist Agent
+4. **Skills-Stable** — 标准化 SOP, 可测试, 可重放, 不直接调 LLM
+5. **AI in the Loop, Human in the Lead** — LLM 先做, 人审核; 不替代人
 
 ---
 
-## 3. 五大核心 Agent 设计
+## 3. 核心 Agent 设计 (1+9 模式)
+
+> 详细设计见 [agent-orchestration.md](./agent-orchestration.md)。本文给概览。
 
 ```mermaid
 flowchart TB
-    subgraph Observe Agents
-        O1[Schema Watcher]
-        O2[Query Log Parser]
-        O3[DAG Observer]
-        O4[dbt Manifest Loader]
+    subgraph "Planner (gpt-5)"
+        P[Planner Agent<br/>Use Case → DAG]
     end
-    subgraph Reasoning Agents
-        R1[Doc Generator]
-        R2[Glossary Mapper]
-        R3[Lineage Reasoner]
-        R4[Owner Recommender]
-        R5[Classification Suggester]
-        R6[Anomaly Detector]
+
+    subgraph "Specialist Agents (9)"
+        A1[Schema Agent]
+        A2[Lineage Agent]
+        A3[Doc Agent]
+        A4[PII Agent]
+        A5[Owner Agent]
+        A6[Quality Agent]
+        A7[Insight Agent]
+        A8[ChatBI Agent]
+        A9[Glossary Agent]
     end
-    subgraph Action Agents
-        A1[NL2SQL]
-        A2[ETL Generator]
-        A3[Quality Rule Suggester]
-        A4[Insight Composer]
+
+    subgraph "Skill Layer (稳定 SOP)"
+        S1[discover_clickhouse_assets]
+        S2[parse_dbt_manifest]
+        S3[parse_superset_export]
+        S4[extract_sql_lineage]
+        S5[infer_table_description]
+        S6[classify_pii_columns]
+        S7[infer_owners]
+        S8[detect_anomalies]
+        S9[compose_insight]
+        S10[nl2sql]
     end
-    Observe --> Reasoning
-    Reasoning --> Action
-    Action -.->|回写| KG[(Knowledge Graph)]
-    KG -.-> Reasoning
+
+    P --> A1 & A2 & A3 & A4 & A5 & A6 & A7 & A8 & A9
+    A1 --> S1
+    A2 --> S2 & S3 & S4
+    A3 --> S5
+    A4 --> S6
+    A5 --> S7
+    A6 --> S8
+    A7 --> S9
+    A8 --> S10
+    A9 --> S5
+
+    S1 & S2 & S3 & S4 & S5 & S6 & S7 & S8 & S9 & S10 --> KG[(Knowledge Graph)]
 ```
 
-### 3.1 Doc Generator Agent
+### 3.1 Doc Generator Agent → Skill: infer_table_description
 
 **目标**：自动为每张表/列写高质量 Description
 
@@ -118,16 +142,18 @@ flowchart TB
 sequenceDiagram
     participant KE as Knowledge Engine
     participant A as Doc Agent
-    participant V as Vertex AI / Ollama
+    participant SK as Skill Runner
+    participant L as LLM (gpt-5)
     participant H as 人工
     participant KG as 知识图谱
 
     KE->>A: 新资产事件
-    A->>V: Prompt(schema + sample + glossary + lineage)
-    V-->>A: Description 草稿
-    A->>A: Schema 校验 / 术语校验
-    A->>KG: 写入 "pending" 状态
-    A->>H: 通知 Owner 审核
+    A->>SK: run_skill(infer_table_description)
+    SK->>L: Prompt(schema + sample + glossary + lineage)
+    L-->>SK: Description 草稿
+    SK->>SK: Validator 校验
+    SK->>KG: 写入 ai_suggestion
+    A->>H: 通知 Owner 审核 (Slack / Web)
     H->>KG: 一键确认 / 修改
 ```
 
@@ -215,73 +241,66 @@ sequenceDiagram
 
 ---
 
-## 4. Observe, Don't Integrate：观察层设计
+## 4. Zero-Touch: MCP 观察层
 
-### 4.1 三类观察方式
+### 4.1 三类观察方式 (MCP-First)
 
 ```mermaid
 flowchart TB
-    subgraph A[零侵入: 只读系统表 / 日志]
-        A1[ClickHouse<br/>system.query_log<br/>system.tables<br/>system.columns]
-        A2[PostgreSQL<br/>pg_stat_statements<br/>information_schema]
-        A3[Airflow<br/>REST API]
+    subgraph A[零侵入: MCP 读只读接口 / 公开 API]
+        A1[ClickHouse MCP<br/>system.query_log / tables / columns]
+        A2[PostgreSQL MCP<br/>pg_stat_statements]
+        A3[Airflow MCP<br/>REST API]
+        A4[GitHub MCP<br/>manifest.json / DAG / 代码]
+        A5[GCS MCP<br/>Superset Export zip]
     end
-    subgraph B[少侵入: Hook / Sidecar]
-        B1[dbt manifest.json]
-        B2[Flink REST API]
-        B3[Superset API]
-        B4[业务代码 SDK]
+    subgraph B[少侵入: 主动 export]
+        B1[Superset 用户导出 zip → GCS]
+        B2[dbt run 产物 manifest.json → GH]
     end
-    subgraph C[主动: 业务配合]
-        C1[PG pgaudit]
-        C2[OTEL]
-        C3[Git Webhook]
+    subgraph C[Webhook 触发]
+        C1[GitHub webhook<br/>YAML 仓库]
+        C2[use_case 变更]
     end
-    A --> OBS[Observe Gateway]
-    B --> OBS
-    C --> OBS
+    A --> SK[IDM Skill Layer]
+    B --> SK
+    C --> UC[Use Case Registry]
+    UC --> SK
 ```
 
 ### 4.2 ClickHouse 观察详细设计
 
+> 不在业务路径上做 ETL, 全部通过 MCP Server 走旁路。
+
 ```sql
--- query_log 表，零侵入获取所有查询
+-- 通过 clickhouse MCP 调: tool=list_query_log
+-- 后端实际执行
 SELECT
   event_time,
   user,
   query_kind,
-  type AS op_type,
   query,
   tables,
-  columns,
-  formatReadableSize(memory_usage) AS mem
+  columns
 FROM system.query_log
-WHERE event_time > now() - INTERVAL 1 HOUR
+WHERE event_time > now() - INTERVAL 5 MINUTE
   AND type != 'QueryStart'
 ORDER BY event_time DESC
-LIMIT 1000;
+LIMIT 500;
 ```
 
-**采集器实现 (Python)**：
-```python
-# 简化示意
-class ClickHouseObserver:
-    def __init__(self, dsn: str, batch: int = 500):
-        self.client = clickhouse_connect.get_client(dsn)
-        self.batch = batch
+**MCP Server 调用 (Skill 内部)**:
 
-    def tail(self, lookback: str = "INTERVAL 5 MINUTE") -> list[QueryEvent]:
-        sql = """
-        SELECT event_time, user, query_kind, query, tables, columns
-        FROM system.query_log
-        WHERE event_time > now() - %(lb)s
-          AND type IN ('QueryFinish','ExceptionWhileProcessing')
-        """
-        rows = self.client.query(sql, {"lb": lookback}).result_rows
-        return [QueryEvent.from_row(r) for r in rows]
+```yaml
+mcp_calls:
+  - name: tail_query_log
+    tool: clickhouse.list_query_log
+    args: { lookback: "INTERVAL 5 MINUTE" }
 ```
 
 ### 4.3 业务应用 SDK (可选)
+
+> IDM 不绑死, 业务零侵入; 愿意主动推送的, 可以用:
 
 ```python
 from idm_sdk import track_dataset
@@ -488,7 +507,7 @@ sequenceDiagram
 | Memory | Redis (短期) + PG (长期, 写入 KG) |
 | 评估 | Promptfoo + 自研 Eval Harness |
 | 监控 | Langfuse (LLM Traces) |
-| 模型 | Vertex AI Gemini + 本地 Ollama (Qwen2.5 / Llama 3.3) |
+| 模型 | **GPT-5 主力 + DeepSeek V3/R1 备选 + Qwen2.5 32B 本地兜底** (经 LiteLLM 统一路由) |
 
 ## 附录 B. 关键 Prompt 模板
 

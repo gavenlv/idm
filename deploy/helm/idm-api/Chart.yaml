@@ -1,0 +1,101 @@
+# IDM API — Helm chart
+# 部署到 GKE ns:idm-core
+# Install:  helm install idm-api ./deploy/helm/idm-api -n idm-core --create-namespace
+
+apiVersion: v2
+name: idm-api
+description: IDM API (FastAPI) - the core API service
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+icon: https://example.com/idm-icon.png
+maintainers:
+  - name: IDM Platform Team
+
+# === 公共配置 ===
+# values.yaml 中按需覆盖
+
+# === 镜像 ===
+image:
+  repository: idm-api
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# === Service / Ingress ===
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+  hosts:
+    - host: idm-api.example.internal
+      paths:
+        - path: /
+          pathType: Prefix
+
+# === Replicas / Resources ===
+replicaCount: 2
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# === Probes ===
+livenessProbe:
+  httpGet: { path: /health, port: 8080 }
+  initialDelaySeconds: 30
+  periodSeconds: 10
+readinessProbe:
+  httpGet: { path: /health/ready, port: 8080 }
+  initialDelaySeconds: 10
+  periodSeconds: 5
+
+# === Security ===
+serviceAccount:
+  create: true
+  name: idm-api
+  annotations:
+    iam.gke.io/gcp-service-account: idm-api@PROJECT.iam.gserviceaccount.com
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: true
+
+# === Volumes (read-only rootfs 需要 writable tmp) ===
+volumes:
+  - name: tmp
+    emptyDir: {}
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+
+# === Config (从 Secret 注入 .env 关键字段) ===
+envFromSecret: idm-api-env
+
+# === 节点选择 / 容忍 ===
+nodeSelector: {}
+tolerations: []
+affinity: {}

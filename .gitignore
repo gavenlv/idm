@@ -1,0 +1,79 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+.eggs/
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.coverage.*
+*.cover
+.tox/
+.hypothesis/
+
+# ===== Node / Web =====
+node_modules/
+.pnpm-store/
+dist/
+.vite/
+*.local
+.next/
+out/
+build/
+.cache/
+coverage/
+
+# ===== Env =====
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ===== Secrets / Auth =====
+*.pem
+*.key
+*.crt
+service-account*.json
+gha-creds-*.json
+
+# ===== Data / Logs =====
+*.log
+logs/
+*.sqlite
+*.db
+data/
+tmp/
+artifacts/
+
+# ===== Helm / K8s =====
+kubeconfig*
+*.kubeconfig
+
+# ===== OS =====
+Desktop.ini
+$RECYCLE.BIN/
+
+# ===== AI / Langfuse =====
+.langfuse/
+.langgraph/
+langgraph-checkpoint-*

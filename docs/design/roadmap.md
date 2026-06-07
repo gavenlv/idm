@@ -87,7 +87,7 @@ gantt
 
 | 能力 | 交付 |
 | --- | --- |
-| LLM 基础设施 | LangGraph + LiteLLM + Vertex AI |
+| LLM 基础设施 | LangGraph + LiteLLM + **GPT-5/DeepSeek/Qwen 经统一网关** |
 | Doc Generator | 自动化生成 + 人工审核流 |
 | Glossary Mapper | 列名 → 业务术语 |
 | Owner Recommender | 综合信号推断 |
@@ -177,7 +177,7 @@ gantt
 | 角色 | M1~M2 | M3~M5 | 备注 |
 | --- | --- | --- | --- |
 | 后端 / 平台 | 2 | 3 | FastAPI / DB / K8s |
-| 前端 | 1 | 1.5 | React / Antd |
+| 前端 | 1 | 1.5 | React 18 / Vite / **ag-grid Community / IDM UI Kit** |
 | 数据 / Agent | 1 | 2 | LLM / Prompt / 评估 |
 | 平台 / SRE | 0.5 | 1 | GKE / 监控 / CI/CD |
 | 产品 / 设计 | 0.5 | 0.5 | 兼 |

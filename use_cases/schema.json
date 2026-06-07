@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://idm.example.com/schemas/use-case/v1.json",
+  "title": "IDM Use Case",
+  "type": "object",
+  "required": ["id", "version", "description", "sources", "analysis"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "version": { "type": "integer", "minimum": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "owners": { "type": "array", "items": { "type": "string", "format": "email" } },
+
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "mcp"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+          "type": {
+            "type": "string",
+            "enum": [
+              "clickhouse", "postgres", "bigquery", "snowflake",
+              "github", "gitlab", "gcs", "s3",
+              "superset_export", "airflow", "flink",
+              "slack", "lark", "confluence", "jira"
+            ]
+          },
+          "mcp": { "type": "string", "minLength": 1 },
+          "config": { "type": "object" },
+          "scope": { "type": "object" }
+        }
+      }
+    },
+
+    "context": {
+      "type": "object",
+      "properties": {
+        "glossary": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["term", "definition"],
+            "properties": {
+              "term": { "type": "string" },
+              "definition": { "type": "string" }
+            }
+          }
+        },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "tier": { "enum": ["critical", "important", "normal"] }
+      }
+    },
+
+    "analysis": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "task", "agent"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9_-]+$" },
+          "task": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+          "agent": {
+            "enum": ["schema", "lineage", "doc", "pii", "owner", "quality", "insight", "chatbi", "glossary"]
+          },
+          "uses": { "type": "array", "items": { "type": "string" } },
+          "depends_on": { "type": "array", "items": { "type": "string" } },
+          "schedule": { "type": "string" },
+          "options": { "type": "object" }
+        }
+      }
+    },
+
+    "deliverables": {
+      "type": "object",
+      "properties": {
+        "knowledge_graph": {
+          "type": "object",
+          "properties": {
+            "entities": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "insights": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["channel", "trigger"],
+            "properties": {
+              "channel": { "enum": ["slack", "lark", "email", "jira"] },
+              "target": { "type": "string" },
+              "trigger": { "type": "array", "items": { "type": "string" } },
+              "severity_filter": { "type": "array", "items": { "type": "string" } },
+              "assignee_role": { "type": "string" }
+            }
+          }
+        },
+        "api_expose": { "type": "boolean" },
+        "console": { "type": "object" }
+      }
+    }
+  }
+}

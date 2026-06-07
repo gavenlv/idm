@@ -1,0 +1,47 @@
+name: Use Case Name
+id: <required-kebab-case-id>
+version: 1
+description: |
+  一句话描述这个 use case 解决什么问题。
+owners:
+  - user@example.com
+
+# === 1. 数据源 (业务系统, 零改动) ===
+sources:
+  - id: <source-id>
+    type: clickhouse | postgres | github | superset_export | airflow | flink | gcs
+    mcp: <mcp-server-name>
+    config:
+      # MCP 调用的入参
+    scope:
+      # 限定范围, 避免全量扫
+
+# === 2. 业务上下文 (LLM 推理) ===
+context:
+  glossary:
+    - { term: GMV, definition: 成交总额 }
+  tags: [domain-tag-1]
+  tier: critical | important | normal
+
+# === 3. 分析任务 (Planner 拆 DAG) ===
+analysis:
+  - id: <step-id>
+    task: <skill-name>
+    agent: schema | lineage | doc | pii | owner | quality | insight | chatbi | glossary
+    uses: [<source-id>, ...]
+    depends_on: [<other-step-id>, ...]
+    schedule: "cron expr"   # 可选, 不写 = 仅触发
+    options: { }            # 可选, 透传给 Skill
+
+# === 4. 交付 ===
+deliverables:
+  knowledge_graph:
+    entities: [table, column, dashboard, pipeline]
+  insights:
+    - channel: slack | lark | email | jira
+      target: <channel or user>
+      trigger: [anomaly_detected, ...]
+      severity_filter: [warning, critical]
+  api_expose: true
+  console:
+    home_widgets: [tier1_health, ...]

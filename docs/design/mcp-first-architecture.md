@@ -183,7 +183,7 @@ flowchart TB
             MS[MCP Server<br/>供外部 Agent 调用 IDM]
         end
         subgraph Web[Web Console]
-            W1[React + Antd]
+            W1[React 18 + Vite<br/>ag-grid Community<br/>+ IDM UI Kit (自研)]
             W2[ChatBI / Insight 面板]
         end
     end
@@ -544,7 +544,7 @@ flowchart LR
 | **Flink** | 数据源 (MCP Server) | **0 改动**（起一个 REST MCP wrapper） |
 | **Superset** | 数据源 (export 解析) | **0 改动**（用户从 UI 导出 JSON 即可） |
 | **GitHub** | 数据源 (官方 MCP) | **0 改动** |
-| **Vertex AI / Ollama** | LLM 推理 | 新建 |
+| **GPT-5 / DeepSeek V3 / 本地 Qwen2.5** | LLM 推理 (LiteLLM 网关统一) | 新建 |
 
 > IDM 真正意义上是 **「外挂在企业数据栈旁边的智能层」**。
 
@@ -573,7 +573,7 @@ idm/use_cases/
 | 主配置 | **YAML** | 人可读 + LLM 可读 + GitOps 友好 |
 | Agent 框架 | **LangGraph + LiteLLM** | 成熟 + 可观测 |
 | 知识存储 | **PG + AGE + pgvector** | 单栈统一 |
-| LLM | **Vertex AI + 本地 Ollama 双轨** | 性能 / 成本 / 合规平衡 |
+| LLM | **GPT-5 主力 + DeepSeek V3 备选 + Qwen2.5 本地兜底** (经 LiteLLM) | 质量 / 成本 / 合规三角平衡 |
 | 推送 | **Slack 优先 + Lark 后续** | 国内使用率高 |
 
 ---
