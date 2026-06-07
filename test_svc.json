@@ -1,0 +1,1 @@
+{"name":"clickhouse-prod","type":"clickhouse","description":"Production ClickHouse cluster","tier":"critical","config":{"host":"ch.example.com","port":8123,"database":"shop"}}

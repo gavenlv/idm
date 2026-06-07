@@ -5,7 +5,10 @@ AGENT_INSTRUCTIONS §1 原则 5: AI in the Loop, Human in the Lead。
 """
 from __future__ import annotations
 
-from sqlalchemy import Float, ForeignKey, String, Text
+import uuid
+from datetime import datetime
+
+from sqlalchemy import DateTime, Float, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,7 +25,7 @@ class AISuggestion(Base, UUIDMixin, TimestampMixin):
     # description / pii_class / owner / lineage / glossary / quality_rule / insight
     target_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     # table / column / glossary / rule
-    target_id: Mapped["uuid.UUID"] = mapped_column(nullable=False, index=True)  # type: ignore[name-defined]  # noqa: F821
+    target_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
     # FK 不加, 避免多类型混表跨约束
 
     # 建议内容
@@ -41,5 +44,5 @@ class AISuggestion(Base, UUIDMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False, index=True)
     # pending / approved / rejected / auto_approved / expired
     reviewed_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    reviewed_at: Mapped["datetime | None"] = mapped_column()  # type: ignore[name-defined]  # noqa: F821
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     review_note: Mapped[str | None] = mapped_column(Text, nullable=True)

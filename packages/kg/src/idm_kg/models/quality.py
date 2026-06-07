@@ -1,9 +1,10 @@
 """QualityRule & QualityResult: 质量断言 + 时序结果。"""
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -19,7 +20,7 @@ class QualityRule(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "quality_rules"
     __table_args__ = (UniqueConstraint("table_id", "name", name="uq_quality_rules_table_name"),)
 
-    table_id: Mapped["uuid.UUID"] = mapped_column(ForeignKey("table_assets.id", ondelete="CASCADE"), index=True, nullable=False)  # type: ignore[name-defined]  # noqa: F821
+    table_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("table_assets.id", ondelete="CASCADE"), index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     rule_type: Mapped[str] = mapped_column(String(32), nullable=False)
     # freshness / volume / null_ratio / distinct / custom / anomaly
@@ -38,7 +39,7 @@ class QualityResult(Base, UUIDMixin, TimestampMixin):
 
     __tablename__ = "quality_results"
 
-    rule_id: Mapped["uuid.UUID"] = mapped_column(ForeignKey("quality_rules.id", ondelete="CASCADE"), index=True, nullable=False)  # type: ignore[name-defined]  # noqa: F821
+    rule_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("quality_rules.id", ondelete="CASCADE"), index=True, nullable=False)
     passed: Mapped[bool] = mapped_column(nullable=False)
     observed_value: Mapped[float | None] = mapped_column(nullable=True)
     threshold: Mapped[float | None] = mapped_column(nullable=True)

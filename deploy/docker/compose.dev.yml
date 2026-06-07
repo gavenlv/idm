@@ -27,7 +27,7 @@ services:
     container_name: idm-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "16379:6379"  # 避让 llm-redis(6379) / superset-redis
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - idm_redis:/data
@@ -42,8 +42,8 @@ services:
       CLICKHOUSE_PASSWORD: idm_ro
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     ports:
-      - "8123:8123"
-      - "9000:9000"
+      - "18123:8123"  # 避让 llm-clickhouse(8123)
+      - "19000:9000"  # 避让 llm-clickhouse(9000)
     ulimits:
       nofile:
         soft: 262144
@@ -61,7 +61,7 @@ services:
       NEXTAUTH_SECRET: dev-secret-change-me
       DATABASE_URL: postgresql://idm:idm@postgres:5432/idm
     ports:
-      - "3001:3000"
+      - "13001:3000"  # 避让可能的 3001 占用
     depends_on:
       postgres:
         condition: service_healthy

@@ -1,6 +1,7 @@
 """ColumnAsset: 表内列 (含 PII 分类、描述、tag)."""
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, UniqueConstraint
@@ -21,7 +22,7 @@ class ColumnAsset(Base, UUIDMixin, TimestampMixin):
         UniqueConstraint("table_id", "name", name="uq_column_assets_table_name"),
     )
 
-    table_id: Mapped["uuid.UUID"] = mapped_column(ForeignKey("table_assets.id", ondelete="CASCADE"), index=True, nullable=False)  # type: ignore[name-defined]  # noqa: F821
+    table_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("table_assets.id", ondelete="CASCADE"), index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     data_type: Mapped[str] = mapped_column(String(64), nullable=False)

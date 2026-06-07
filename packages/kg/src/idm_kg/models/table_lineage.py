@@ -1,6 +1,7 @@
 """TableLineage: 血缘边 (由 Lineage Agent + parse_* Skills 产生)."""
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Float, ForeignKey, String, UniqueConstraint
@@ -25,8 +26,8 @@ class TableLineage(Base, UUIDMixin, TimestampMixin):
         UniqueConstraint("upstream_id", "downstream_id", "transform_type", name="uq_lineage_up_down_type"),
     )
 
-    upstream_id: Mapped["uuid.UUID"] = mapped_column(ForeignKey("table_assets.id", ondelete="CASCADE"), index=True, nullable=False)  # type: ignore[name-defined]  # noqa: F821
-    downstream_id: Mapped["uuid.UUID"] = mapped_column(ForeignKey("table_assets.id", ondelete="CASCADE"), index=True, nullable=False)  # type: ignore[name-defined]  # noqa: F821
+    upstream_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("table_assets.id", ondelete="CASCADE"), index=True, nullable=False)
+    downstream_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("table_assets.id", ondelete="CASCADE"), index=True, nullable=False)
     transform_type: Mapped[str] = mapped_column(String(32), default="copy", nullable=False)
     job_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     sql: Mapped[str | None] = mapped_column(String(8192), nullable=True)

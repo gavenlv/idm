@@ -1,6 +1,7 @@
 """Tag & AssetTag: 业务标签 (manual / ai_inferred)."""
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
 from sqlalchemy import ForeignKey, String, UniqueConstraint
@@ -33,8 +34,8 @@ class AssetTag(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "asset_tags"
     __table_args__ = (UniqueConstraint("table_id", "tag_id", name="uq_asset_tags_table_tag"),)
 
-    table_id: Mapped["uuid.UUID"] = mapped_column(ForeignKey("table_assets.id", ondelete="CASCADE"), index=True, nullable=False)  # type: ignore[name-defined]  # noqa: F821
-    tag_id: Mapped["uuid.UUID"] = mapped_column(ForeignKey("tags.id", ondelete="CASCADE"), index=True, nullable=False)  # type: ignore[name-defined]  # noqa: F821
+    table_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("table_assets.id", ondelete="CASCADE"), index=True, nullable=False)
+    tag_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tags.id", ondelete="CASCADE"), index=True, nullable=False)
     source: Mapped[str] = mapped_column(String(32), default="manual", nullable=False)
     # manual / ai_inferred / policy
 

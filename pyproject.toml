@@ -13,8 +13,11 @@ package = false
 
 [tool.uv.workspace]
 members = [
-    "apps/*",
+    "apps/api",
     "packages/*",
+]
+exclude = [
+    "apps/web",  # Node.js, 独立 npm 管理
 ]
 
 [tool.uv.sources]
