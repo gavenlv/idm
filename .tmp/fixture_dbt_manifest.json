@@ -1,0 +1,102 @@
+{
+  "metadata": {
+    "dbt_version": "1.6.0",
+    "project_name": "shop_dw",
+    "generated_at": "2026-06-01T00:00:00.000Z"
+  },
+  "nodes": {
+    "model.shop_dw.dim_users": {
+      "resource_type": "model",
+      "name": "dim_users",
+      "alias": "dim_users",
+      "fqn": ["shop_dw", "marts", "dim_users"],
+      "database": "shop",
+      "schema": "default",
+      "description": "用户维度表, 整合来自 raw 层和 clickstream 的用户画像.",
+      "columns": {
+        "user_id": {"name": "user_id", "data_type": "Int64", "description": "用户主键"},
+        "email": {"name": "email", "data_type": "String", "description": "用户邮箱, PII"},
+        "phone": {"name": "phone", "data_type": "String", "description": "用户手机号, PII"},
+        "country": {"name": "country", "data_type": "String", "description": "国家代码"},
+        "first_order_at": {"name": "first_order_at", "data_type": "DateTime", "description": "首次下单时间"}
+      },
+      "depends_on": {"nodes": ["source.shop_dw.raw.users", "model.shop_dw.stg_orders"]}
+    },
+    "model.shop_dw.fct_orders_daily": {
+      "resource_type": "model",
+      "name": "fct_orders_daily",
+      "alias": "fct_orders_daily",
+      "fqn": ["shop_dw", "marts", "fct_orders_daily"],
+      "database": "shop",
+      "schema": "default",
+      "description": "订单日粒度事实表.",
+      "columns": {
+        "order_date": {"name": "order_date", "data_type": "Date", "description": "订单日期"},
+        "user_id": {"name": "user_id", "data_type": "Int64", "description": "用户ID, PII"},
+        "order_count": {"name": "order_count", "data_type": "Int64", "description": "订单数"},
+        "gmv": {"name": "gmv", "data_type": "Decimal(18,2)", "description": "成交总额"}
+      },
+      "depends_on": {"nodes": ["model.shop_dw.stg_orders", "model.shop_dw.dim_users"]}
+    },
+    "model.shop_dw.stg_orders": {
+      "resource_type": "model",
+      "name": "stg_orders",
+      "alias": "stg_orders",
+      "fqn": ["shop_dw", "staging", "stg_orders"],
+      "database": "shop",
+      "schema": "staging",
+      "description": "订单明细中间层 (来源: raw.events).",
+      "columns": {
+        "order_id": {"name": "order_id", "data_type": "Int64", "description": "订单ID"},
+        "user_id": {"name": "user_id", "data_type": "Int64", "description": "用户ID"},
+        "amount": {"name": "amount", "data_type": "Decimal(18,2)", "description": "订单金额"},
+        "status": {"name": "status", "data_type": "String", "description": "订单状态"}
+      },
+      "depends_on": {"nodes": ["source.shop_dw.raw.orders"]}
+    },
+    "model.shop_dw.country_seed": {
+      "resource_type": "seed",
+      "name": "country_seed",
+      "alias": "country_seed",
+      "fqn": ["shop_dw", "seeds", "country_seed"],
+      "database": "shop",
+      "schema": "default",
+      "description": "国家代码种子表.",
+      "columns": {
+        "code": {"name": "code", "data_type": "String"},
+        "name_zh": {"name": "name_zh", "data_type": "String"}
+      },
+      "depends_on": {"nodes": []}
+    }
+  },
+  "sources": {
+    "source.shop_dw.raw.users": {
+      "resource_type": "source",
+      "name": "users",
+      "identifier": "users",
+      "source_name": "raw",
+      "database": "shop",
+      "schema": "raw",
+      "description": "上游原始用户表 (ClickHouse).",
+      "columns": {
+        "id": {"name": "id", "data_type": "Int64"},
+        "email": {"name": "email", "data_type": "String"},
+        "created_at": {"name": "created_at", "data_type": "DateTime"}
+      }
+    },
+    "source.shop_dw.raw.orders": {
+      "resource_type": "source",
+      "name": "orders",
+      "identifier": "orders",
+      "source_name": "raw",
+      "database": "shop",
+      "schema": "raw",
+      "description": "上游原始订单表.",
+      "columns": {
+        "id": {"name": "id", "data_type": "Int64"},
+        "user_id": {"name": "user_id", "data_type": "Int64"},
+        "amount": {"name": "amount", "data_type": "Decimal(18,2)"}
+      }
+    }
+  }
+}

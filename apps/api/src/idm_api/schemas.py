@@ -32,7 +32,7 @@ class ServiceRead(ServiceBase):
 # === TableAsset ===
 class TableAssetBase(BaseModel):
     name: str = Field(..., max_length=256)
-    fqn: str = Field(..., max_length=512, pattern=r"^[a-z0-9_.]+$")
+    fqn: str = Field(..., max_length=512, pattern=r"^[a-z0-9_.:-]+$")
     asset_type: Literal["table", "view", "materialized_view", "dbt_model", "dashboard"] = "table"
     tier: Literal["critical", "important", "normal"] = "normal"
     status: Literal["active", "deprecated", "archived"] = "active"
@@ -62,6 +62,70 @@ class TableAssetListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# === ColumnAsset ===
+class ColumnAssetRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    table_id: UUID
+    name: str
+    ordinal: int
+    data_type: str
+    nullable: bool
+    is_primary_key: bool
+    is_partition_key: bool
+    description: str | None
+    pii_class: str
+    pii_confidence: float
+    pii_source: str | None
+    sample_values: list[Any]
+    null_ratio: float
+    distinct_count: int | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ColumnAssetListResponse(BaseModel):
+    items: list[ColumnAssetRead]
+    total: int
+
+
+class AssetPiiSummary(BaseModel):
+    """一张表的 PII 风险摘要."""
+
+    table_id: UUID
+    pii_columns: int
+    high_risk_columns: int
+    by_class: dict[str, int]
+    samples: list[dict[str, Any]]  # [{column_name, pii_class, confidence}, ...]
+
+
+# === TableLineage ===
+class LineageEdgeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    upstream_id: UUID
+    downstream_id: UUID
+    transform_type: str
+    job_id: str | None
+    confidence: float
+    source: str
+    upstream_fqn: str | None = None
+    downstream_fqn: str | None = None
+
+
+class LineageGraphResponse(BaseModel):
+    """以一张表为中心的 lineage 视图 (depth=BFS 上/下游 N 层)."""
+
+    center_fqn: str
+    center_id: UUID
+    upstream: list[LineageEdgeRead]  # 边列表, 端点 fqn 已展开
+    downstream: list[LineageEdgeRead]
+    nodes: list[dict[str, Any]]  # [{id, fqn, asset_type, tier}, ...] 去重
+    edges: list[LineageEdgeRead]
 
 
 # === AISuggestion ===

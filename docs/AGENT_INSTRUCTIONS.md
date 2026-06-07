@@ -562,4 +562,102 @@ flowchart LR
 
 ---
 
+## 19. 已落地状态 (Build State — 截至 M1 S1.2, 2026-06-07)
+
+> **这一节是"实测"而非"设计"**: 列出现已跑通的功能 / 端点 / 文件,
+> 后续 Agent 拿到任务时, **先看这节判断是否需要从零造轮子**。
+
+### 19.1 已完成里程碑
+
+| Milestone | 状态 | 验证 |
+| --- | --- | --- |
+| **M1 S1.0** 脚手架 (uv workspace + FastAPI + React) | ✅ | `make dev` 起 API+Web |
+| **M1 S1.1** 知识图谱 + 资产 / 服务 / 建议 CRUD | ✅ | `GET /api/v1/assets` 列出资产 |
+| **M1 S1.2** MCP-First + Skill 体系 + E2E 跑通 | ✅ | `verify.py` 全绿 |
+| **M1 S1.3** 前端 Skills 页面 (ag-grid 触发 / 结果展示) | ✅ | `verify_skills_page.py` 全绿 |
+| **M1 S1.4** 接入 DeepSeek (去 mock) + PII 推断 Skill + approve→KG 同步 | ✅ | `verify_deepseek.py` + `verify_pii.py` + `verify_approve_sync.py` 全绿 |
+| **M1 S1.5** Asset 详情 (列 + PII 摘要) + 建议审核 UI 升级 + dbt manifest Skill | ✅ | `verify_s1_5.py` 全绿 |
+
+### 19.2 已落地的代码模块 (按"用频率"排序)
+
+| 模块 | 路径 | 关键能力 |
+| --- | --- | --- |
+| **FastAPI 入口** | `apps/api/src/idm_api/main.py` | lifespan, CORS, 5 个 router 挂载 |
+| **Settings** | `apps/api/src/idm_api/config.py` | Pydantic, 读 `.env` |
+| **DB engine** | `apps/api/src/idm_api/db.py` | async SQLAlchemy + 同步 url 切分 |
+| **Models** | `packages/kg/src/idm_kg/models/*.py` | Service/Database/Schema/TableAsset/ColumnAsset/AISuggestion |
+| **MCP Client** | `apps/api/src/idm_api/skills/mcp.py` | `ClickHouseMCP` (clickhouse-connect, HTTP), 健康检查 |
+| **LLM Router** | `apps/api/src/idm_api/skills/llm.py` | `LLMRouter` LiteLLM 三级降级 + mock 兜底 |
+| **Skill Registry** | `apps/api/src/idm_api/skills/registry.py` | `@skill` 装饰器, `SkillContext` |
+| **Skill Runner** | `apps/api/src/idm_api/skills/runner.py` | `run_skill()`, `list_skills()`, trace |
+| **Skill #1** | `apps/api/src/idm_api/skills/builtin/discover_clickhouse_assets.py` | 扫库→表→列+采样→入 KG |
+| **Skill #2** | `apps/api/src/idm_api/skills/builtin/infer_table_description.py` | LLM 推断描述→`ai_suggestion.pending` |
+| **Skill #3** | `apps/api/src/idm_api/skills/builtin/classify_pii_columns.py` | LLM 推断 PII→`ai_suggestion.pii_class` |
+| **Routers** | `apps/api/src/idm_api/routers/{health,services,assets,suggestions,skills}.py` | 全部 `/api/v1/...` REST |
+| **前端 (骨架)** | `apps/web/src/{ui,pages,App.tsx}` | ag-grid Community + 自研 UI Kit, **5 个页面** (Assets/Skills/Suggestions/Health) |
+| **Alembic** | `migrations/versions/0001_initial_schema.py` | M1 初始 schema |
+| **Compose** | `deploy/docker/compose.dev.yml` | PG (5432) + Redis (16379) + ClickHouse (18123) + Langfuse (13001) |
+| **Seed 数据** | `deploy/docker/seed-shop.sql` | shop.users / orders_daily / payments / order_items / products |
+
+### 19.3 已验证的端到端 (E2E) 流程
+
+```
+[1] API 启动         GET /health/ready          → {db: ok}
+[2] MCP 健康检查     GET /api/v1/skills/mcp/health → {clickhouse: ok, all_ok: true}
+[3] 列 Skill 名单    GET /api/v1/skills          → [discover_clickhouse_assets, infer_table_description]
+[4] 扫 ClickHouse   POST /api/v1/skills/run {name: discover_clickhouse_assets, inputs: {database: shop}}
+                                              → 5 张表入 KG (table_assets + column_assets)
+[5] LLM 推描述      POST /api/v1/skills/run {name: infer_table_description, inputs: {table_ids: [...]}}
+                                              → 5 条 ai_suggestion (confidence=0.65, model=mock)
+[6] 列建议           GET /api/v1/suggestions     → 5 pending
+[7] 审核闭环        POST /api/v1/suggestions/{id}/approve {reviewer, note}
+                                              → status: pending → approved
+                                              → description 同步 → table_asset.description
+                                              → pii_class 同步 → column_asset.pii_class + pii_confidence + pii_source
+```
+
+**已自动化的 E2E 验证脚本**: `idm/.tmp/verify.py` / `verify_skills_page.py` / `verify_deepseek.py` / `verify_pii.py` / `verify_approve_sync.py` / `verify_s1_5.py` (一次性脚本, 不进 CI)。
+
+### 19.4 关键约定 (本仓库已落地)
+
+| 项 | 实现 |
+| --- | --- |
+| **包管理** | uv workspace, `apps/api` + `packages/kg` 是 Python 包, `apps/web` 独立 npm |
+| **服务端口** | API: 8080, Web: 5173, PG: 5432, ClickHouse: 18123, Redis: 16379 |
+| **数据库账号** | idm / idm (PG), idm_ro / idm_ro (CH) |
+| **依赖注入** | `Depends(get_db)` (FastAPI), `get_clickhouse_mcp()` (全局单例) |
+| **Skill 注册** | 装饰器 `@skill(name, version, agent)`, handler 签名 `(ctx, **inputs) -> SkillResult` |
+| **LLM 降级** | gpt-5 → deepseek-v3 → qwen-local → mock (无 key 时) |
+| **asset fqn** | 模式 `^[a-z0-9_.:-]+$` (允许服务名带 `-`, 如 `clickhouse-prod`) |
+| **ai_suggestion 流** | pending → (人工 approve/reject) → 落 table_asset.description |
+
+### 19.5 暂未实现 (M1 S1.3+ 待办)
+
+| 任务 | 优先级 | 备注 |
+| --- | --- | --- |
+| 前端 Skills 页面 (ag-grid 触发 / 展示 trace) | P1 | UI 已有, 需接 API |
+| GitHub MCP Client (read file / blame / search) | P1 | 走 `mcp-python-sdk` 官方 |
+| Superset Export 解析 (dashboard yaml) | P1 | 自研 parser, 读 GCS |
+| dbt manifest 解析 | P2 | json → table + lineage |
+| Airflow DAG 解析 | P2 | API + 自研 |
+| Langfuse 接入 (trace 上报) | P2 | 已起容器, SDK 未接 |
+| PII 推断 Skill | P2 | profile=local 路由 |
+| NL2SQL Skill (5 层 Guard) | P2 | 主打场景 |
+| Insight / Anomaly 引擎 | P3 | 周期任务 + 推送 |
+| Eval Harness (Gold Snapshot) | P3 | `tests/gold/*.json` |
+| 单元 / 集成测试 (pytest) | P1 | 已有 conftest, 待补 |
+| CI (GitHub Actions) | P1 | `.github/workflows/ci.yml` 已配, 待跑通 |
+
+### 19.6 不要重复造轮子 (Do NOT Re-Implement)
+
+> 以下模块 **已存在且通过 E2E 验证**, 后续任务请直接调用, 不要重写:
+
+- ❌ 不要新建 ClickHouse 连接代码 → 用 `get_clickhouse_mcp()` ([skills/mcp.py](file:///d:/workspace/github-ai/idm/apps/api/src/idm_api/skills/mcp.py))
+- ❌ 不要在 Router 里直接调 LLM → 用 `@skill()` 注册后通过 `run_skill()` 调
+- ❌ 不要写新的 alembic migration (除非改 schema) → 用现有 `0001_initial_schema.py`
+- ❌ 不要在 main.py 里 import 业务逻辑 → 在 `routers/` 加
+- ❌ 不要复制 clickhouse_connect / litellm 配置 → 用 `Settings` (config.py)
+
+---
+
 > 📌 **本文件是 IDM 的"宪法"**; 任何代码 / 文档 / 决策与本文档冲突 → 以本文档为准 → 然后提 PR 更新本文档与对应详细文档。

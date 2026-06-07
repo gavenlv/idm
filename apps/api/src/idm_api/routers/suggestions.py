@@ -5,7 +5,9 @@ AGENT_INSTRUCTIONS §1 原则 5:
 - 人工 / 策略 approve/reject
 - approve 后才写正式字段 (description / pii_class / owner / ...)
 
-M1: 仅暴露 read + approve + reject 接口, approve 后由 Service 层同步到目标表。
+M1: approve 后按 suggestion_type 分发, 同步到目标表:
+    - description → table_asset.description
+    - pii_class   → column_asset.pii_class / pii_confidence / pii_source
 """
 from __future__ import annotations
 
@@ -24,6 +26,8 @@ from idm_api.schemas import (
 )
 from idm_kg.models.ai_suggestion import AISuggestion
 from idm_kg.models.audit_log import AuditLog
+from idm_kg.models.column_asset import ColumnAsset
+from idm_kg.models.table_asset import TableAsset
 
 router = APIRouter()
 
@@ -82,6 +86,9 @@ async def approve_suggestion(
     sug.reviewed_at = datetime.now(timezone.utc)
     sug.review_note = body.review_note
 
+    # 按 suggestion_type 分发同步到目标表
+    sync_msg = await _apply_suggestion(db, sug)
+
     db.add(
         AuditLog(
             actor=actor,
@@ -94,11 +101,41 @@ async def approve_suggestion(
                 "target_id": str(sug.target_id),
                 "confidence": sug.confidence,
                 "model": sug.model,
+                "sync": sync_msg,
             },
         )
     )
     await db.flush()
     return sug
+
+
+async def _apply_suggestion(db: AsyncSession, sug: AISuggestion) -> str:
+    """Approve 后把 payload 同步到目标表. 返回简短描述供审计."""
+    payload = sug.payload or {}
+    if sug.suggestion_type == "description" and sug.target_type == "table":
+        t = await db.get(TableAsset, sug.target_id)
+        if t is None:
+            return "table missing"
+        new_desc = payload.get("description")
+        if new_desc:
+            t.description = new_desc[:2048]
+        new_tier = payload.get("tier")
+        if new_tier in ("critical", "important", "normal"):
+            t.tier = new_tier
+        return f"table.description <- {len(new_desc or '')} chars"
+
+    if sug.suggestion_type == "pii_class" and sug.target_type == "column":
+        c = await db.get(ColumnAsset, sug.target_id)
+        if c is None:
+            return "column missing"
+        pii = payload.get("pii_class")
+        if pii:
+            c.pii_class = pii
+        c.pii_confidence = sug.confidence
+        c.pii_source = "ai_inferred"
+        return f"column.pii_class <- {pii}"
+
+    return "(no sync handler for this type yet)"
 
 
 @router.post("/{suggestion_id}/reject", response_model=SuggestionRead, summary="Reject suggestion")
