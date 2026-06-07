@@ -1104,3 +1104,66 @@ INFO:     127.0.0.1:23857 - "GET /api/v1/skills/mcp/health HTTP/1.1" 200 OK
 INFO:     127.0.0.1:1281 - "GET /api/v1/glossary?limit=200 HTTP/1.1" 404 Not Found
 INFO:     127.0.0.1:2919 - "GET /api/v1/glossary?limit=200 HTTP/1.1" 404 Not Found
 INFO:     127.0.0.1:8481 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58896 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33835 - "GET /api/health/ready HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:33832 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33833 - "GET /api/v1/suggestions?status=pending&limit=10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33834 - "GET /api/v1/owners?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:22448 - "GET /api/v1/skills HTTP/1.1" 200 OK
+INFO:     127.0.0.1:5055 - "GET /api/v1/skills/mcp/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:13330 - "GET /api/health/ready HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:5587 - "GET /api/v1/owners?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52020 - "GET /api/v1/skills HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52021 - "GET /api/v1/skills/mcp/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:24481 - "GET /api/v1/feedback?limit=200 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:5748 - "GET /api/v1/feedback?limit=200 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51428 - "GET /api/v1/suggestions?status=pending&limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39803 - "GET /api/v1/suggestions?status=approved&limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39802 - "GET /api/v1/suggestions?status=pending&limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39804 - "GET /api/v1/suggestions?status=rejected&limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:21655 - "GET /api/v1/suggestions?status=approved&limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:21654 - "GET /api/v1/suggestions?status=pending&limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:21656 - "GET /api/v1/suggestions?status=rejected&limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:25175 - "GET /api/v1/skills/mcp/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:8150 - "GET /api/v1/assets/b2b5ce82-f59f-4a51-ae91-5f1d7cd6c32f/columns HTTP/1.1" 200 OK
+INFO:     127.0.0.1:2816 - "GET /api/v1/assets/b2b5ce82-f59f-4a51-ae91-5f1d7cd6c32f/lineage?depth=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:2815 - "GET /api/v1/assets/b2b5ce82-f59f-4a51-ae91-5f1d7cd6c32f/pii-summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59330 - "GET /api/v1/assets/03c23eca-68e3-4ed2-b94b-3dbadd43ec1c/pii-summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59329 - "GET /api/v1/assets/03c23eca-68e3-4ed2-b94b-3dbadd43ec1c/columns HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59331 - "GET /api/v1/assets/03c23eca-68e3-4ed2-b94b-3dbadd43ec1c/lineage?depth=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:1099 - "GET /api/v1/assets/446aed05-5a2a-4669-b67d-5fce342bcc88/columns HTTP/1.1" 200 OK
+INFO:     127.0.0.1:16716 - "GET /api/v1/assets/446aed05-5a2a-4669-b67d-5fce342bcc88/pii-summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:16717 - "GET /api/v1/assets/446aed05-5a2a-4669-b67d-5fce342bcc88/lineage?depth=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:1660 - "GET /api/v1/owners?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41935 - "GET /api/v1/skills/mcp/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:21479 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:34912 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51173 - "GET /api/v1/skills HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57991 - "GET /api/v1/skills/mcp/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56057 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35047 - "GET /api/health/ready HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:35046 - "GET /api/v1/owners?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35045 - "GET /api/v1/suggestions?status=pending&limit=10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50838 - "GET /api/v1/tags?limit=200 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:21584 - "GET /api/v1/tags?limit=200 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:12270 - "GET /api/v1/use-cases HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:39149 - "GET /api/v1/use-cases HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:57560 - "GET /api/v1/skills HTTP/1.1" 200 OK
+INFO:     127.0.0.1:22590 - "GET /api/v1/skills/mcp/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7389 - "GET /api/v1/suggestions?status=pending&limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54696 - "GET /api/v1/suggestions?status=pending&limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54697 - "GET /api/v1/suggestions?status=approved&limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54698 - "GET /api/v1/suggestions?status=rejected&limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51506 - "GET /api/health/ready HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49174 - "GET /api/health/ready HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36216 - "GET /api/v1/skills/mcp/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:22746 - "GET /api/health/info HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:13097 - "GET /api/health/ready HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49999 - "GET /api/health/info HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49199 - "GET /api/health/ready HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:10737 - "GET /api/v1/skills HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44440 - "GET /api/v1/skills/mcp/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55650 - "GET /api/v1/skills/mcp/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:1624 - "GET /api/v1/skills HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44815 - "GET /api/v1/skills/mcp/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:29912 - "GET /api/v1/skills/mcp/health HTTP/1.1" 200 OK
