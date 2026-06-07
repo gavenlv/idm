@@ -56,6 +56,9 @@ class TableAssetRead(TableAssetBase):
     column_count: int
     row_count: int | None
     size_bytes: int | None
+    # === Data Quality (M4) ===
+    health_score: float | None = None
+    health_score_updated_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -304,3 +307,81 @@ class SearchResponse(BaseModel):
     query: str
     total: int
     items: list[SearchHit]
+
+
+# === ChatBI (M4) ===
+class ChatBIRequest(BaseModel):
+    """ChatBI v1 输入: 自然语言 -> SQL (5 层 Guard 在 nl2sql skill 里)."""
+
+    question: str = Field(..., min_length=1, max_length=2000)
+    service: str | None = Field(None, description="限定 service (空 = 全部)")
+    dry_run: bool = Field(True, description="仅生成 SQL, 不真跑")
+
+
+class ChatBIResponse(BaseModel):
+    question: str
+    sql: str | None
+    rationale: str | None
+    confidence: float
+    guard_warnings: list[str] = Field(default_factory=list)
+    result_sample: list[dict[str, Any]] = Field(default_factory=list)
+    chart_hint: str | None = None
+    duration_ms: int = 0
+    model: str | None = None
+
+
+# === Impact Analysis (M3) ===
+class ImpactAnalysisResponse(BaseModel):
+    """表影响分析: 上游/下游 + 受影响 owner/term."""
+
+    center_fqn: str
+    center_id: UUID
+    direction: Literal["upstream", "downstream", "both"]
+    depth: int
+    upstream_count: int
+    downstream_count: int
+    affected_owners: list[str]
+    affected_terms: list[str]
+    paths: list[dict[str, Any]]  # [{from, to, via}, ...]
+
+
+# === Data Quality (M4) ===
+class QualityRuleCreate(BaseModel):
+    table_id: UUID
+    name: str = Field(..., min_length=1, max_length=128)
+    rule_type: Literal["freshness", "volume", "null_ratio", "distinct", "custom", "anomaly"]
+    severity: Literal["info", "warning", "critical"] = "warning"
+    definition: dict[str, Any] = Field(default_factory=dict)
+    schedule: str = "0 * * * *"
+    description: str | None = None
+
+
+class QualityRuleRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    table_id: UUID
+    name: str
+    rule_type: str
+    severity: str
+    definition: dict[str, Any]
+    schedule: str
+    is_enabled: bool
+    description: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class QualityRuleListResponse(BaseModel):
+    items: list[QualityRuleRead]
+    total: int
+
+
+class QualityDashboard(BaseModel):
+    avg_health_score: float | None
+    tables_total: int
+    tables_low: int  # health < 70
+    tables_critical: int  # health < 40
+    rules_total: int
+    rules_failing: int
+    recent_anomalies: list[dict[str, Any]]  # ai_suggestion items
+    last_run: datetime | None

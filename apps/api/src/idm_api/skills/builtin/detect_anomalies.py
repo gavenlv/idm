@@ -19,6 +19,7 @@ import json
 import logging
 import math
 import time
+import uuid
 from typing import Any
 
 from sqlalchemy import select
@@ -271,6 +272,28 @@ async def detect_anomalies(ctx: SkillContext, **inputs: Any) -> SkillResult:
                 except Exception as e:  # noqa: BLE001
                     logger.warning("suggestion write failed: %s", e)
 
+    # === M1.5 Data Quality: 回写 health_score (0-100, 越低越异常) ===
+    # 算法: 每张表起始 100 分, 每个 high -25, medium -10, low -3; 下限 0
+    score_map: dict[uuid.UUID, float] = {}
+    for t in tables:
+        score_map[t.id] = 100.0
+    for f in findings:
+        tid = uuid.UUID(f["table_id"]) if isinstance(f["table_id"], str) else f["table_id"]
+        sev = f.get("severity", "low")
+        delta = {"high": 25, "medium": 10, "low": 3}.get(sev, 3)
+        score_map[tid] = max(0.0, score_map.get(tid, 100.0) - delta)
+    if apply and score_map:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        for t in tables:
+            if t.id in score_map:
+                t.health_score = score_map[t.id]
+                t.health_score_updated_at = now
+        try:
+            await ctx.db.flush()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("health_score write failed: %s", e)
+
     if apply:
         await ctx.db.commit()
 
@@ -288,6 +311,9 @@ async def detect_anomalies(ctx: SkillContext, **inputs: Any) -> SkillResult:
                 "latency_ms": latency,
                 "service": service,
                 "applied": apply,
+                "health_score_avg": round(
+                    sum(score_map.values()) / max(1, len(score_map)), 1
+                ) if score_map else None,
             },
             artifacts=[],
         ),

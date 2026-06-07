@@ -9,11 +9,12 @@
 import { useEffect, useState } from "react";
 import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { LanguageSwitcher, SearchPalette, Status, useSearchPalette } from "./ui";
+import { GlobalSearchBar, LanguageSwitcher, Status } from "./ui";
 import { DashboardPage } from "./pages/DashboardPage";
 import { AssetsPage } from "./pages/AssetsPage";
 import { HealthPage } from "./pages/HealthPage";
 import { LineagePage } from "./pages/LineagePage";
+import { QualityPage } from "./pages/QualityPage";
 import { SkillsPage } from "./pages/SkillsPage";
 import { SuggestionsPage } from "./pages/SuggestionsPage";
 import { OwnersPage } from "./pages/OwnersPage";
@@ -56,9 +57,10 @@ const NAV: NavGroup[] = [
     ],
   },
   {
-    title: "System",
+    title: "Observability",
     items: [
-      { to: "/health", key: "health", label: "Health", icon: "♥" },
+      { to: "/quality", key: "quality", label: "Data Quality", icon: "♥" },
+      { to: "/health", key: "health", label: "Health", icon: "♦" },
     ],
   },
 ];
@@ -74,6 +76,7 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   "/skills": { title: "Skills", subtitle: "AI-driven governance skills" },
   "/suggestions": { title: "Suggestions", subtitle: "Review and approve AI suggestions" },
   "/feedback": { title: "User Feedback", subtitle: "Improve Few-Shot quality from accept/reject" },
+  "/quality": { title: "Data Quality", subtitle: "Rules, baselines, anomaly events, table health score" },
   "/health": { title: "Health", subtitle: "Service info and readiness" },
 };
 
@@ -108,7 +111,6 @@ function useSidebarCollapsed() {
 export default function App() {
   const { t } = useTranslation();
   const location = useLocation();
-  const palette = useSearchPalette();
   const [collapsed, setCollapsed] = useSidebarCollapsed();
   const meta = PAGE_META[location.pathname] ?? {
     title: t("common.noData"),
@@ -181,37 +183,8 @@ export default function App() {
           <div className="idm-topbar__subtitle">{meta.subtitle}</div>
         </div>
         <div className="idm-topbar__spacer" />
+        <GlobalSearchBar className="idm-topbar__search" />
         <div className="idm-topbar__actions">
-          <button
-            className="idm-search-trigger"
-            onClick={() => palette.setOpen(true)}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "6px 10px",
-              border: "1px solid var(--idm-border)",
-              background: "var(--idm-bg-elevated)",
-              color: "var(--idm-text-muted)",
-              fontSize: 12,
-              cursor: "pointer",
-              minWidth: 200,
-            }}
-          >
-            <span>⌕</span>
-            <span style={{ flex: 1, textAlign: "left" }}>
-              {t("palette.trigger")}
-            </span>
-            <span
-              style={{
-                fontSize: 10,
-                padding: "1px 4px",
-                border: "1px solid var(--idm-border)",
-              }}
-            >
-              ⌘K
-            </span>
-          </button>
           <Status kind="ok">LIVE</Status>
           <LanguageSwitcher />
         </div>
@@ -230,6 +203,7 @@ export default function App() {
           <Route path="/skills" element={<SkillsPage />} />
           <Route path="/suggestions" element={<SuggestionsPage />} />
           <Route path="/feedback" element={<FeedbackPage />} />
+          <Route path="/quality" element={<QualityPage />} />
           <Route path="/health" element={<HealthPage />} />
           <Route
             path="*"
@@ -237,9 +211,6 @@ export default function App() {
           />
         </Routes>
       </main>
-
-      {/* === Global search palette === */}
-      <SearchPalette open={palette.open} onClose={() => palette.setOpen(false)} />
     </div>
   );
 }

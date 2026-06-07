@@ -15,7 +15,8 @@
     "dashboard": "Home",
     "tags": "Tags",
     "glossary": "Glossary",
-    "use_cases": "Use Cases"
+    "use_cases": "Use Cases",
+    "quality": "Data Quality"
   },
   "common": {
     "search": "Search…",
@@ -187,6 +188,10 @@
   "feedback": {
     "title": "User Feedback",
     "subtitle": "Accept/reject Skill outputs to improve Few-Shot quality"
+  },
+  "quality": {
+    "title": "Data Quality",
+    "subtitle": "Rules, baselines, anomaly events, table health score"
   },
   "dashboard": {
     "title": "Home",

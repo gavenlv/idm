@@ -193,3 +193,74 @@ async def client(app_with_db) -> AsyncIterator[AsyncClient]:
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
     reset_feedback_store()
+
+
+# ---------------------------------------------------------------------------
+# BDD 同步 client (for pytest-bdd scenarios)
+# ---------------------------------------------------------------------------
+
+class _SyncClient:
+    """Thin sync wrapper around httpx.AsyncClient + ASGI transport.
+
+    pytest-bdd 生成的是 sync test function; 而 conftest 里的 `client` 是 async
+    fixture. 这里提供一个 sync 入口, 把每个调用包到 `asyncio.run` 里。
+    性能: BDD 用例数 < 30, 这个 wrapper 开销可忽略。
+    """
+
+    def __init__(self, app) -> None:
+        from httpx import ASGITransport, AsyncClient
+        self._app = app
+        self._transport = ASGITransport(app=app)
+        # 复用 feedback store reset
+        from idm_api.eval.feedback import reset_feedback_store
+        reset_feedback_store()
+        self._reset_feedback = reset_feedback_store
+
+    def _run(self, coro):
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            # 在已有 loop 里: 用 nest_asyncio 兜底 (仅测试用)
+            import nest_asyncio  # type: ignore
+            nest_asyncio.apply()
+            return loop.run_until_complete(coro)
+        return asyncio.run(coro)
+
+    def _build(self) -> "AsyncClient":
+        from httpx import AsyncClient
+        return AsyncClient(transport=self._transport, base_url="http://test")
+
+    def request(self, method: str, url: str, **kwargs):
+        async def _do():
+            async with self._build() as c:
+                r = await c.request(method, url, **kwargs)
+                # 立即读 body 以便 status_code / json() 可用
+                await r.aread()
+                return r
+        return self._run(_do())
+
+    def get(self, url: str, **kw):
+        return self.request("GET", url, **kw)
+
+    def post(self, url: str, **kw):
+        return self.request("POST", url, **kw)
+
+    def patch(self, url: str, **kw):
+        return self.request("PATCH", url, **kw)
+
+    def delete(self, url: str, **kw):
+        return self.request("DELETE", url, **kw)
+
+    def close(self) -> None:
+        self._reset_feedback()
+
+
+@pytest.fixture
+def bdd_client(app_with_db):
+    """Sync HTTP client for BDD scenarios (pytest-bdd)."""
+    c = _SyncClient(app_with_db)
+    yield c
+    c.close()

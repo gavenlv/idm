@@ -12,4 +12,4 @@ export { Tabs } from "./Tabs";
 export { EmptyState } from "./EmptyState";
 export { LanguageSwitcher } from "./LanguageSwitcher";
 export { Stat, Stats } from "./Stats";
-export { SearchPalette, useSearchPalette } from "./SearchPalette";
+export { GlobalSearchBar } from "./GlobalSearchBar";

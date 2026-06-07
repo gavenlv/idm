@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -54,6 +54,12 @@ class TableAsset(Base, UUIDMixin, TimestampMixin):
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     last_query_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     query_count_30d: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # === Data Quality (M4) ===
+    # 综合健康分 0-100, 由 detect_anomalies 写入; 越低越异常
+    health_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # 上次计算 health_score 的时间
+    health_score_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # 扩展属性 (PII / 业务标签 / 备注)
     extra: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)

@@ -15,7 +15,8 @@
     "dashboard": "首页",
     "tags": "标签",
     "glossary": "术语",
-    "use_cases": "Use Case"
+    "use_cases": "Use Case",
+    "quality": "数据质量"
   },
   "common": {
     "search": "搜索…",
@@ -187,6 +188,10 @@
   "feedback": {
     "title": "用户反馈",
     "subtitle": "采纳 / 拒绝 Skill 输出, 提升 Few-Shot 质量"
+  },
+  "quality": {
+    "title": "数据质量",
+    "subtitle": "规则 / 基线 / 异常事件 / 表健康分"
   },
   "dashboard": {
     "title": "首页",
