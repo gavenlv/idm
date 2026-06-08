@@ -297,6 +297,19 @@ def bdd_app():
     p1 = patch("idm_api.skills.runner.get_clickhouse_mcp", return_value=fake_mcp)
     p2 = patch("idm_api.skills.runner.get_llm_router", return_value=fake_llm)
     p3 = patch("idm_api.routers.skills.get_clickhouse_mcp", return_value=fake_mcp)
+
+    # 强制 GitHub MCP 走"无 token"模式 (BDD 期望的契约):
+    # 不论本机 .env 设了 MOCK_GITHUB_ROOT / MCP_GITHUB_TOKEN, 都按"未配置"处理,
+    # 这样 BDD 的 no-token 场景才能稳定通过.
+    fake_gh = MagicMock()
+    fake_gh.has_token = False
+    fake_gh._use_local = False
+    gh_patches = [
+        patch("idm_api.skills.builtin.parse_flink_job.get_github_mcp", return_value=fake_gh, create=True),
+        patch("idm_api.skills.builtin.parse_mex_io.get_github_mcp", return_value=fake_gh, create=True),
+        patch("idm_api.skills.builtin.parse_airflow_dag.get_github_mcp", return_value=fake_gh, create=True),
+        patch("idm_api.skills.builtin.infer_table_owners.get_github_mcp", return_value=fake_gh, create=True),
+    ]
     # Cover all builtin skills that import get_clickhouse_mcp directly
     # via `from idm_api.skills.mcp import get_clickhouse_mcp`. Each skill
     # module keeps its own reference, so we must patch the local symbol.
@@ -336,6 +349,8 @@ def bdd_app():
     p1.start()
     p2.start()
     p3.start()
+    for gp in gh_patches:
+        gp.start()
     for p in patches:
         p.start()
 
@@ -345,6 +360,8 @@ def bdd_app():
         p1.stop()
         p2.stop()
         p3.stop()
+        for gp in gh_patches:
+            gp.stop()
         for p in patches:
             p.stop()
         app.dependency_overrides.clear()

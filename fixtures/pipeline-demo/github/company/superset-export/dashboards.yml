@@ -1,0 +1,65 @@
+# superset-export/dashboards.yml
+# 阶段 6: Superset 报表导出 (yaml 格式 — 不依赖 Superset 运行时)
+# 真实管道: ClickHouse shop.fct_orders_risk_daily  →  Superset datasets/charts/dashboards
+# 会被 parse_superset_dashboard Skill (stage=6) 解析 (走 mcp=file 模式)
+
+dashboards:
+  - id: 1
+    title: 订单风险监控
+    slug: orders_risk_dashboard
+    description: 订单风控模型输出监控 (按 risk_label / 日期)
+    published: true
+    owner: data-platform
+    chart_ids: [10, 11, 12, 13]
+
+  - id: 2
+    title: 订单业务概览
+    slug: orders_biz_dashboard
+    description: 订单 GMV / 支付方式 / 退款率
+    published: true
+    owner: data-platform
+    chart_ids: [20, 21]
+
+charts:
+  - id: 10
+    slice_name: 高风险订单数
+    viz_type: big_number
+    dataset_id: 100
+    description: 当日 risk_label='high' 的订单总数
+  - id: 11
+    slice_name: 风险评分分布
+    viz_type: histogram
+    dataset_id: 100
+    description: risk_score 直方图
+  - id: 12
+    slice_name: 欺诈概率 Top 10
+    viz_type: table
+    dataset_id: 100
+    description: 按 fraud_prob 降序
+  - id: 13
+    slice_name: 风险趋势
+    viz_type: line
+    dataset_id: 100
+    description: 过去 7 天高风险订单趋势
+  - id: 20
+    slice_name: 订单 GMV
+    viz_type: big_number
+    dataset_id: 101
+    description: 当日 GMV
+  - id: 21
+    slice_name: 支付方式占比
+    viz_type: pie
+    dataset_id: 101
+    description: 各支付方式订单数占比
+
+datasets:
+  - id: 100
+    table_name: fct_orders_risk_daily
+    schema: shop
+    database: shop_dw
+    description: 订单风控日事实表 (MEX 输出)
+  - id: 101
+    table_name: fct_orders_daily
+    schema: shop
+    database: shop_dw
+    description: 订单日业务事实表

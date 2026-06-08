@@ -26,7 +26,16 @@ Feature: Data Pipeline Lineage (GCS + Flink + ClickHouse + Superset)
     And the response body is valid JSON
     And the skill output has an empty items list or a no objects summary
 
-  Scenario: parse_flink_job without github token returns a clear error
+  Scenario: discover_gcs_assets rejects stage outside 1|2|4
+    When I run the skill "discover_gcs_assets" with inputs:
+      | bucket | some-bucket |
+      | stage | 3 |
+    Then the response status is 200
+    And the response body is valid JSON
+    And the response body has an ok value of false
+    And the response body has an error containing "stage"
+
+  Scenario: parse_flink_job without github token and no local root returns a clear error
     When I run the skill "parse_flink_job" with inputs:
       | repo | some-org/some-flink-jobs |
       | paths | ["jobs/orders_*.sql"] |
@@ -35,7 +44,7 @@ Feature: Data Pipeline Lineage (GCS + Flink + ClickHouse + Superset)
     And the response body has an ok value of false
     And the response body has an error containing "MCP_GITHUB_TOKEN"
 
-  Scenario: parse_mex_io without github token returns a clear error
+  Scenario: parse_mex_io without github token and no local root returns a clear error
     When I run the skill "parse_mex_io" with inputs:
       | repo | some-org/some-mex-models |
       | paths | ["orders/io.yaml"] |
@@ -44,9 +53,43 @@ Feature: Data Pipeline Lineage (GCS + Flink + ClickHouse + Superset)
     And the response body has an ok value of false
     And the response body has an error containing "MCP_GITHUB_TOKEN"
 
+  Scenario: parse_airflow_dag rejects stage outside 1
+    When I run the skill "parse_airflow_dag" with inputs:
+      | dag_file_path | /tmp/non-existent.py |
+      | stage | 5 |
+    Then the response status is 200
+    And the response body is valid JSON
+    And the response body has an ok value of false
+    And the response body has an error containing "stage"
+
+  Scenario: parse_superset_dashboard rejects stage outside 6
+    When I run the skill "parse_superset_dashboard" with inputs:
+      | stage | 3 |
+    Then the response status is 200
+    And the response body is valid JSON
+    And the response body has an ok value of false
+    And the response body has an error containing "stage"
+
   Scenario: analyze_data_pipeline with no use_case returns an error
     When I run the skill "analyze_data_pipeline" with inputs:
       | apply | false |
     Then the response status is 200
     And the response body is valid JSON
     And the response body has an ok value of false
+
+  Scenario: analyze_data_pipeline runs 6-stage orchestration with empty sources
+    When I run the skill "analyze_data_pipeline" with inputs:
+      | use_case | {"id": "test", "sources": []} |
+      | apply | false |
+    Then the response status is 200
+    And the response body is valid JSON
+    And the response body has an ok value of false
+    And the response body has an error containing "use_case.sources"
+
+  Scenario: analyze_data_pipeline with sample use_case reports stage coverage
+    When I run the skill "analyze_data_pipeline" with inputs:
+      | use_case | {"id": "orders-mex", "sources": [{"id": "gcs-raw", "type": "gcs", "mcp": "gcs", "config": {"bucket": "non-existent-12345"}, "stage": 1}, {"id": "clickhouse", "type": "clickhouse", "mcp": "clickhouse", "config": {"host": "localhost", "database": "shop"}, "stage": 5}, {"id": "sp", "type": "superset_export", "mcp": "file", "config": {"path": "gs://x/"}, "stage": 6}]} |
+      | apply | false |
+    Then the response status is 200
+    And the response body is valid JSON
+    And the response body has an ok value of true

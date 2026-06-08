@@ -1,0 +1,182 @@
+# =============================================================================
+# IDM Use Case: shop-orders-mex-pipeline (6 阶段真实管道演示)
+# 适用: M1.5 端到端 demo / 离线测试 / E2E 验证
+# 详见: docs/design/data-pipeline-lineage.md
+# =============================================================================
+id: shop-orders-mex-pipeline
+version: 1
+description: |
+  订单风控数据管道 — 6 阶段真实数据治理演示 (GCS→AF+FK→GCS→MEX→GCS→FK2→CH→Superset)
+  - 业务: 订单风控 (M)EX 推理 + ClickHouse 落地 + Superset 报表
+  - 资产: GCS (raw + model-input + model-output) + ClickHouse (5 表) + Superset (2 dashboard, 6 chart)
+  - 代码: 1 Airflow DAG + 2 Flink SQL + 1 MEX io.yaml
+owners:
+  - alice@example.com
+  - ml-team@example.com
+
+# === 数据源 (MCP-First, 每个源都打 6 阶段标号) ===
+sources:
+  # === 阶段 1: GCS raw 上游 ===
+  - id: gcs-raw
+    type: gcs
+    mcp: gcs
+    stage: 1
+    config:
+      bucket: company-raw
+      prefix: orders/2026/06
+      format_filter: [csv, parquet]
+    scope:
+      include_keys: ["orders-*.csv", "orders-*.parquet"]
+
+  # === 阶段 1: Airflow DAG ===
+  - id: gh-airflow
+    type: github
+    mcp: github
+    stage: 1
+    config:
+      repo: company/dwh
+      ref: main
+    scope:
+      paths: ["dags/etl_orders_daily.py"]
+
+  # === 阶段 1: Flink preprocess SQL ===
+  - id: gh-flink-preprocess
+    type: github
+    mcp: github
+    stage: 1
+    config:
+      repo: company/dwh
+      ref: main
+    scope:
+      paths: ["flink_jobs/orders_preprocess.sql"]
+
+  # === 阶段 2: GCS model-input ===
+  - id: gcs-model-input
+    type: gcs
+    mcp: gcs
+    stage: 2
+    config:
+      bucket: company-model-input
+      prefix: orders/2026/06
+    scope:
+      include_keys: ["orders_enriched-*.csv", "orders_enriched-*.parquet"]
+
+  # === 阶段 3: MEX 黑盒 ===
+  - id: gh-mex
+    type: github
+    mcp: github
+    stage: 3
+    config:
+      repo: company/mex-models
+      ref: main
+    scope:
+      paths: ["orders/io.yaml"]
+
+  # === 阶段 4: GCS model-output ===
+  - id: gcs-model-output
+    type: gcs
+    mcp: gcs
+    stage: 4
+    config:
+      bucket: company-model-output
+      prefix: orders/2026/06
+    scope:
+      include_keys: ["orders_risk-*.csv", "orders_risk-*.parquet"]
+
+  # === 阶段 5: Flink load + ClickHouse ===
+  - id: gh-flink-load
+    type: github
+    mcp: github
+    stage: 5
+    config:
+      repo: company/dwh
+      ref: main
+    scope:
+      paths: ["flink_jobs/load_orders_risk_to_clickhouse.sql"]
+
+  - id: clickhouse-shop
+    type: clickhouse
+    mcp: clickhouse
+    stage: 5
+    config:
+      host: localhost
+      port: 18123
+      database: shop
+    scope:
+      include_tables: ["fct_orders_risk_daily", "fct_orders_daily"]
+
+  # === 阶段 6: Superset Report ===
+  - id: superset-export
+    type: superset_export
+    mcp: file           # 本地 yaml 模式 (无需 Superset 运行时)
+    stage: 6
+    config:
+      path: fixtures/pipeline-demo/github/company/superset-export/dashboards.yml
+    scope:
+      dashboard_keywords: ["risk", "orders"]
+
+# === 业务上下文 ===
+context:
+  glossary:
+    - term: GMV
+      definition: 成交总额 (含退款前)
+    - term: AOV
+      definition: 平均订单金额 = GMV / 订单数
+    - term: risk_score
+      definition: MEX 模型输出的 0~1 风控评分, 越高越可疑
+    - term: risk_label
+      definition: 风控等级 low / medium / high
+  tags: [orders, mex, tier-1, risk, finance-sensitive]
+  tier: critical
+
+# === 分析任务 (Planner 拆 DAG; 1 个端到端 skill + 1 个 detail skill) ===
+analysis:
+  - id: pipeline-overview
+    task: analyze_data_pipeline    # 端到端 6 阶段编排
+    agent: lineage
+    uses: [gcs-raw, gh-airflow, gh-flink-preprocess, gcs-model-input,
+           gh-mex, gcs-model-output, gh-flink-load, clickhouse-shop,
+           superset-export]
+    options:
+      apply: true
+
+  - id: doc-orders
+    task: infer_table_description
+    agent: doc
+    uses: [clickhouse-shop]
+    depends_on: [pipeline-overview]
+
+  - id: pii-users
+    task: classify_pii_columns
+    agent: pii
+    uses: [clickhouse-shop]
+    depends_on: [pipeline-overview]
+
+  - id: owner-orders
+    task: infer_owners
+    agent: owner
+    uses: [gh-airflow]
+    depends_on: [pipeline-overview]
+
+  - id: quality-orders
+    task: detect_anomalies
+    agent: quality
+    schedule: "0 9 * * *"
+    uses: [clickhouse-shop]
+    depends_on: [pipeline-overview]
+
+# === 交付 ===
+deliverables:
+  knowledge_graph:
+    entities: [table, column, pipeline, dashboard, gcs_object]
+  insights:
+    - channel: slack
+      target: "#data-stewards"
+      trigger: [anomaly_detected, pii_unmasked, owner_missing]
+      severity_filter: [warning, critical]
+    - channel: jira
+      trigger: [pii_unmasked, pipeline_broken]
+      assignee_role: secops
+  api_expose: true
+  console:
+    home_widgets: [tier1_health, recent_anomalies, missing_owners, pipeline_coverage]

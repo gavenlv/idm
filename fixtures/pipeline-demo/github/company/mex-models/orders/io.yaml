@@ -1,0 +1,43 @@
+# mex-models/orders/io.yaml
+# 阶段 3: MEX (Model Execution) 黑盒模型 IO 声明
+# 真实管道: 读 GCS company-model-input  →  推理 (黑盒)  →  写 GCS company-model-output
+# 会被 parse_mex_io Skill (stage=3) 解析
+#
+# 约定 (见 AGENT_INSTRUCTIONS §4.3):
+#   - input.fqn  : GCS model-input 路径
+#   - output.fqn : GCS model-output 路径
+#   - pipeline 实体: type=mex_model, stage=3
+#   - 血缘: input → pipeline → output, pipeline_stage=2|3|4
+
+models:
+  - name: orders_risk_model
+    version: 3.2.1
+    input:
+      fqn: gcs://company-model-input/orders/
+      format: parquet
+      partition_keys: [order_date]
+    output:
+      fqn: gcs://company-model-output/orders/
+      format: parquet
+      partition_keys: [order_date]
+    owner: ml-team@example.com
+    schedule: "0 3 * * *"
+    description: 订单风控模型 — 输出 risk_score / risk_label / fraud_prob / chargeback_prob
+    sla:
+      max_latency_minutes: 30
+      min_throughput_rows_per_minute: 10000
+
+  - name: orders_lifetime_value_model
+    version: 1.5.0
+    input:
+      fqn: gcs://company-model-input/orders/
+      format: parquet
+    output:
+      fqn: gcs://company-model-output/orders_ltv/
+      format: parquet
+      partition_keys: [as_of_date]
+    owner: ml-team@example.com
+    schedule: "0 4 * * 0"   # 每周日 4 点
+    description: 用户 LTV 预估模型 — 输出 30/60/90 天预期 GMV
+    sla:
+      max_latency_minutes: 120

@@ -17,6 +17,87 @@
 
 ---
 
+## 0.5 自动化执行铁律 (Auto-Execution Mandate — ⛔ 最高优先级, 2026-06-08 增)
+
+> **⛔ 本节优先级 = 5 (最高), 高于五大设计原则与所有 ADR。任何 Agent / 自动化脚本 / CI / 部署命令 100% 强制执行, 违反视为 BUG。**
+
+### 0.5.0 铁律七条 (The Seven Iron Rules)
+
+> **任何 shell 命令必须同时满足以下 7 条, 否则视为违规:**
+
+| # | 铁律 | 含义 | 反例 |
+| --- | --- | --- | --- |
+| 1 | **⏱ 必须 `timeout 30s`** | 所有命令必须 `timeout 30s` (Win: `timeout 30`, *nix: `timeout 30s`) 包住, 测试用 `timeout 60s` | ❌ 裸跑 `pytest` / `npm test` |
+| 2 | **🚫 不阻塞 (Non-Blocking)** | 跑测试 / build / 拉镜像 / `kubectl apply` / 长任务必须 `blocking=false` + `CheckCommandStatus` 轮询 | ❌ `blocking=true` 等 5 分钟 |
+| 3 | **➡ 超时立刻继续 (Auto-Continue)** | 30s 没回包 → 立刻 proceed next step, **不重试同一命令** | ❌ 重试 3 次同一卡住命令 |
+| 4 | **🔁 幂等 (Idempotent)** | 部署 / 写库命令要幂等 (`kubectl apply` / `alembic upgrade head` / `upsert`) | ❌ `CREATE TABLE` 必爆 |
+| 5 | **🚷 不交互 (No-Interactive)** | 不允许弹 yes/no / 文件覆盖确认; 缺信息用 placeholder + WARN | ❌ `npm create vite@latest .` |
+| 6 | **📝 日志可定位 (Loggable)** | 长命令输出 `tee` 到 `apps/.tmp/cmd-<ts>.log` + `.err` | ❌ 输出扔掉, 出问题找不回 |
+| 7 | **⏩ 失败不中断 (Fail-Soft)** | 单条命令失败 → **记录 + 继续**, 不要 `set -e` / `&&` 链式全停; 留 batch report | ❌ `cmd1 && cmd2` 一爆全停 |
+
+### 0.5.1 标准调用模板 (Copy-Paste)
+
+```bash
+# === 模板 A: 短命令 (< 10s, 同步) ===
+timeout 30s <cmd>
+
+# === 模板 B: 长命令 (>= 10s, 后台 + 轮询) ===
+TS=$(date +%s)
+timeout 30s <cmd> > apps/.tmp/cmd-$TS.log 2> apps/.tmp/cmd-$TS.err &
+echo $! > apps/.tmp/cmd.pid
+# 30s 后 polling:
+kill -0 $(cat apps/.tmp/cmd.pid) 2>/dev/null && kill $(cat apps/.tmp/cmd.pid) || echo "ok finished"
+```
+
+### 0.5.2 测试类命令标准调用 (本仓库)
+
+```bash
+# 1) 单个 BDD feature
+cd apps/api && timeout 60s uv run --no-progress pytest tests/bdd/test_data_pipeline.py -v
+
+# 2) 全部 BDD
+cd apps/api && timeout 60s uv run --no-progress pytest tests/bdd/
+
+# 3) 单元测试
+cd apps/api && timeout 60s uv run --no-progress pytest tests/ --ignore=tests/bdd
+
+# 4) 全部测试 (BDD + 单测)
+cd apps/api && timeout 60s uv run --no-progress pytest
+
+# 5) Alembic 迁移校验
+cd migrations && timeout 30s uv run --no-progress alembic upgrade head --sql | head -50
+
+# 6) 前端构建
+cd apps/web && timeout 60s npm run build
+
+# 7) Lint
+cd apps/api && timeout 30s uv run --no-progress ruff check .
+cd apps/web && timeout 30s npm run lint
+```
+
+### 0.5.3 失败 / 超时处理流程
+
+```
+命令发出
+  ├── < 30s 返回 ──→ 检查 exit code ──→ 继续 / 记录错误 → proceed
+  ├── = 30s 超时 ──→ kill PID ──→ 写 apps/.tmp/cmd-<ts>.err ──→ proceed (不重试)
+  └── > 30s 且 blocking=true ──→ ⛔ VIOLATION, 立刻 stop, 改用 blocking=false
+```
+
+### 0.5.4 违规检测 (Self-Audit, 每轮必跑)
+
+- [ ] 当前命令是否带 `timeout 30s`?
+- [ ] 是否 `blocking=false` + `CheckCommandStatus`?
+- [ ] 输出是否落 `apps/.tmp/`?
+- [ ] 失败是否只记录不停整体?
+- [ ] 是否避免交互 (yes/no、文件覆盖)?
+- [ ] 是否可重复跑不爆 (幂等)?
+- [ ] 是否使用 placeholder 而非弹问?
+
+> **详细模板 / 常见陷阱 / BDD 进阶**: 见 [§16.5](#165-自动化执行铁律-auto-execution-rules--2026-06-08-增)
+
+---
+
 ## 1. 五大设计原则 (Must Follow)
 
 | # | 原则 | 含义 | 反面 |
@@ -560,6 +641,17 @@ flowchart LR
 > **目的**：让 Agent 在执行 IDM 任务时 **不阻塞、不卡死、不必用户反复确认**,
 > **所有 shell 命令、测试、构建、部署 均自动后台运行**, 出错再回退/重试。
 
+### 16.5.0 总则 (TL;DR)
+
+> **任何命令必须满足以下 4 条, 否则视为违规:**
+>
+> 1. **超时** `timeout 30s` 包住 (Windows 走 `timeout 30`, 类 Unix 走 `timeout 30s`)
+> 2. **后台** 长任务 `blocking=false` + `CheckCommandStatus` 轮询
+> 3. **幂等** 部署 / 写库命令可重复跑不爆
+> 4. **不交互** 不允许弹 yes/no / 文件覆盖确认
+>
+> **失败处理**: 30s 没回包 → 立刻继续下一步, 不重试同一卡住命令; 日志落 `apps/.tmp/cmd-<ts>.log`。
+
 ### 16.5.1 命令运行规约
 
 | 规则 | 含义 | 反例 |
@@ -571,6 +663,7 @@ flowchart LR
 | **幂等** | 所有部署 / 写库命令要幂等 (`kubectl apply` / `alembic upgrade head` / `upsert`), 重复跑不爆 | ❌ `CREATE TABLE` 必爆 |
 | **不要求交互输入** | 任何命令 **不允许弹交互**; 缺信息时用 placeholder + 警告日志, **不要卡住问** | ❌ `npm create vite@latest .` (会卡) |
 | **错误日志可定位** | 长命令输出 `tee` 到 `apps/.tmp/cmd-<ts>.log` + `cmd-<ts>.err` | ❌ 输出扔掉, 出问题找不回 |
+| **临时文件位置** | 所有 `.tmp/` 放 `<project>/apps/.tmp/` 下, **不** 放系统 `/tmp` (Windows 无 `/tmp`) | ❌ `> /tmp/x.log` 在 Windows 失败 |
 
 ### 16.5.2 标准命令模板 (Agent 内部使用)
 
@@ -592,6 +685,36 @@ kill -0 $(cat apps/.tmp/cmd.pid) 2>/dev/null && kill $(cat apps/.tmp/cmd.pid) ||
 - [ ] 输出是否落到 `apps/.tmp/`?
 - [ ] 失败是否只记录不停下整体?
 - [ ] 是否避免交互式 (yes/no、文件覆盖确认)?
+
+### 16.5.4 BDD / 单元测试标准调用 (本仓库)
+
+```bash
+# 1) 跑 BDD (data_pipeline 单独)
+cd apps/api && timeout 60s uv run --no-progress pytest tests/bdd/test_data_pipeline.py -v
+
+# 2) 跑全部 BDD
+cd apps/api && timeout 60s uv run --no-progress pytest tests/bdd/
+
+# 3) 跑全部单测
+cd apps/api && timeout 60s uv run --no-progress pytest tests/ --ignore=tests/bdd
+
+# 4) 跑全部 (BDD + 单测)
+cd apps/api && timeout 60s uv run --no-progress pytest
+
+# 5) 跑 alembic SQL 校验 (PG)
+cd migrations && timeout 30s uv run --no-progress alembic upgrade head --sql | head -50
+```
+
+### 16.5.5 常见陷阱
+
+| 陷阱 | 解决 |
+| --- | --- |
+| Windows `/tmp` 不存在 | 用 `tempfile.gettempdir()` 或 `apps/.tmp/` |
+| Bash on Windows 路径 | 用 `/d/workspace/...` 而非 `d:\workspace\...` |
+| `uv` 索引锁 | 加 `--no-progress` 或 `--quiet` |
+| pytest 输出被截断 | 输出重定向 `> /tmp/x.log`, 再 `cat` |
+| `nest_asyncio` 缺失 | BDD 已自带, 单测无需 |
+| `pip install` 超时 | 改用 `uv pip install` (快 10x) |
 
 ---
 
@@ -731,7 +854,7 @@ kill -0 $(cat apps/.tmp/cmd.pid) 2>/dev/null && kill $(cat apps/.tmp/cmd.pid) ||
 | GitHub MCP Client (read file / blame / search) | ✅ | M1 S1.13 完成 (owner 推断用) |
 | Superset Export 解析 (dashboard yaml) | ✅ | M1 S1.6 完成 |
 | dbt manifest 解析 | ✅ | M1 S1.5 完成 |
-| Airflow DAG 解析 | ✅ | M1 S1.7 完成 |
+| Airflow DAG 解析 | ✅ | M1 S1.7 完成 + v2 (stage=1 强化) |
 | Langfuse 接入 (trace 上报) | ✅ | 通过 LiteLLM 间接 |
 | PII 推断 Skill | ✅ | M1 S1.4 完成 |
 | NL2SQL Skill (5 层 Guard) | ✅ | M1 S1.10 完成 |
@@ -739,7 +862,7 @@ kill -0 $(cat apps/.tmp/cmd.pid) 2>/dev/null && kill $(cat apps/.tmp/cmd.pid) ||
 | Eval Harness (Gold Snapshot) | ✅ | M1 S1.14 完成, 含 LLM-judge + 用户反馈 + few-shot 导出 |
 | 单元 / 集成测试 (pytest) | ✅ | 55 个测试全绿 (含 test_skills_integration, test_feedback_router) |
 | CI (GitHub Actions) | ✅ | `.github/workflows/{ci,skill-eval}.yml` |
-| BDD E2E 测试 (pytest-bdd) | ✅ | 26 个场景, 5 个 feature 文件, 含 data_pipeline (GCS/Flink) |
+| BDD E2E 测试 (pytest-bdd) | ✅ | 32 个场景, 8 个 feature 文件, 含 data_pipeline (6 阶段 + 阶段参数校验) |
 | **Data Quality 提前** | ✅ | QualityPage + health_score 写入 detect_anomalies + rules CRUD |
 | **侧边栏主题统一** | ✅ | CSS 变量 `--idm-bg-sidebar`, 与主页一致 |
 | **内联全局搜索** | ✅ | GlobalSearchBar 替代弹出式, 支持 / 快捷键 + 键盘导航 |
@@ -747,17 +870,21 @@ kill -0 $(cat apps/.tmp/cmd.pid) 2>/dev/null && kill $(cat apps/.tmp/cmd.pid) ||
 | **Flink MCP** | ✅ | stub + 接口 (待 Flink JobManager URL 接入) |
 | **Superset DB MCP** | ✅ | stub + 接口 (待 Superset Postgres URL 接入) |
 | **Airflow DB MCP** | ✅ | stub + 接口 (待 Airflow Postgres URL 接入) |
-| **discover_gcs_assets Skill** | ✅ | 扫 GCS → 推断 schema → 写 gcs_objects + table_asset (asset_subtype=gcs_object) |
-| **parse_flink_job Skill** | ✅ | 读 Flink SQL from GitHub → sqlglot 解析 → 写 table_lineage (transform_subtype=flink_sql) |
-| **analyze_data_pipeline Skill** | ✅ | 端到端串联多 Skill, 输出 pipeline_graph |
+| **discover_gcs_assets Skill** | ✅ v2 | 扫 GCS → 推断 schema → 写 gcs_objects + table_asset (stage=1\|2\|4) |
+| **parse_flink_job Skill** | ✅ v2 | 读 Flink SQL from GitHub → sqlglot 解析 → 写 table_lineage (stage=1 preprocess / stage=5 load_ch) |
+| **parse_mex_io Skill** | ✅ v1 | 读 MEX io.yaml from GitHub → 写 pipeline (stage=3) + 2→3→4 血缘 |
+| **parse_airflow_dag Skill** | ✅ v2 | AST 解析 .py → 写 table_asset (asset_type=airflow_task, stage=1) + lineage (dag_chain) + pipeline (type=airflow_dag, stage=1) |
+| **parse_superset_dashboard Skill** | ✅ v2 | Superset REST → 写 dataset/chart/dashboard (stage=6) + chart→dataset→table 血缘 + pipeline (type=superset_refresh, stage=6) |
+| **analyze_data_pipeline Skill** | ✅ v2 | 端到端 6 阶段编排: GCS→AF+FK→GCS→MEX→GCS→FK2→CH→Superset, 输出 stage_coverage + missing_stages |
 | **Pipeline / GcsObject / PipelineRun 模型** | ✅ | migration 0003, ORM 已挂载 |
+| **pipeline_stage 字段扩展** | ✅ | migration 0004, 加 stage 到 pipelines / gcs_objects / table_assets / table_lineage |
 | **K8s base manifests** | ✅ | kustomize base: namespace, sa (RRSA), deployments, services, hpa, pdb, network-policies, ingress-class |
 | **K8s ACS overlay** | ✅ | kustomize overlays/acs: ALB Ingress + EIP 自动绑定, 镜像 patch, 资源最小化 |
 | **KMS Secret 模板** | ✅ | `deploy/k8s/overlays/acs/secrets-kms.yaml.example` + 明文 base64 备用 |
 | **一键部署脚本** | ✅ | `deploy/aliyun/deploy.sh` (timeout 30s, 非阻塞, 不需用户确认) |
 | **回滚 / port-forward 脚本** | ✅ | `deploy/aliyun/rollback.sh` / `port-forward.sh` |
 | **部署文档** | ✅ | `deploy/aliyun/README.md` (含架构图 / 镜像 / Secret / ALB / 成本估算) |
-| **自动化执行铁律** | ✅ | §16.5 已加入本文档, 所有 Agent 命令必须 timeout 30s + 非阻塞 |
+| **自动化执行铁律** | ✅ | §16.5 已加入本文档 (总则 + 规约 + 模板 + 自检 + BDD 调用 + 常见陷阱), 所有 Agent 命令必须 timeout 30s + 非阻塞 |
 
 ### 19.6 不要重复造轮子 (Do NOT Re-Implement)
 

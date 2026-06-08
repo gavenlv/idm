@@ -76,3 +76,47 @@ INSERT INTO shop.order_items VALUES ('O003', 'SKU-C', 1, 1299.0, 0);
 INSERT INTO shop.products VALUES ('SKU-A', 'Keyboard',   'electronics', 199.00, 50);
 INSERT INTO shop.products VALUES ('SKU-B', 'Coffee Mug', 'lifestyle',   44.75, 200);
 INSERT INTO shop.products VALUES ('SKU-C', 'E-reader',   'electronics', 1299.0, 20);
+
+-- === 6 阶段真实管道 — 阶段 5 落地表 (MEX 输出经 Flink load) ===
+CREATE TABLE IF NOT EXISTS shop.fct_orders_risk_daily (
+    order_id String,
+    user_id UInt64,
+    order_date Date,
+    risk_score Float64,
+    risk_label LowCardinality(String),
+    fraud_prob Float64,
+    chargeback_prob Float64,
+    model_version LowCardinality(String),
+    model_run_at DateTime
+) ENGINE = ReplacingMergeTree(model_run_at)
+PARTITION BY toYYYYMM(order_date)
+ORDER BY (order_date, order_id);
+
+INSERT INTO shop.fct_orders_risk_daily VALUES
+    ('ORD-20260608-0001', 10001, '2026-06-08', 0.12, 'low',    0.02,  0.01,  'risk-v3.2.1', '2026-06-08 10:30:00'),
+    ('ORD-20260608-0002', 10002, '2026-06-08', 0.78, 'high',   0.65,  0.22,  'risk-v3.2.1', '2026-06-08 10:30:00'),
+    ('ORD-20260608-0003', 10003, '2026-06-08', 0.34, 'medium', 0.18,  0.08,  'risk-v3.2.1', '2026-06-08 10:30:00'),
+    ('ORD-20260608-0004', 10004, '2026-06-08', 0.08, 'low',    0.01,  0.005, 'risk-v3.2.1', '2026-06-08 10:30:00'),
+    ('ORD-20260608-0005', 10005, '2026-06-08', 0.45, 'medium', 0.31,  0.12,  'risk-v3.2.1', '2026-06-08 10:30:00');
+
+-- === 6 阶段真实管道 — 阶段 5 业务事实表 (供 Superset 引用) ===
+CREATE TABLE IF NOT EXISTS shop.fct_orders_daily (
+    order_id String,
+    user_id UInt64,
+    order_date Date,
+    total_amount Decimal(18, 2),
+    currency LowCardinality(String),
+    status LowCardinality(String),
+    payment_method LowCardinality(String),
+    item_count UInt32,
+    country LowCardinality(String)
+) ENGINE = ReplacingMergeTree()
+PARTITION BY toYYYYMM(order_date)
+ORDER BY (order_date, order_id);
+
+INSERT INTO shop.fct_orders_daily VALUES
+    ('ORD-20260608-0001', 10001, '2026-06-08', 328.50,  'CNY', 'paid',     'alipay',     3,  'CN'),
+    ('ORD-20260608-0002', 10002, '2026-06-08', 1099.00, 'CNY', 'paid',     'wechat_pay', 5,  'CN'),
+    ('ORD-20260608-0003', 10003, '2026-06-08', 45.20,   'CNY', 'refunded', 'credit_card',1,  'US'),
+    ('ORD-20260608-0004', 10004, '2026-06-08', 876.30,  'CNY', 'paid',     'alipay',     8,  'CN'),
+    ('ORD-20260608-0005', 10005, '2026-06-08', 212.00,  'CNY', 'pending',  'credit_card',2,  'CN');

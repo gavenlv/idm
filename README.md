@@ -99,6 +99,48 @@ make web-dev
 - Skill 命名: `<verb>_<object>`
 - Agent 命名: `<领域>Agent`
 
+## 6 阶段真实数据管道 — 一键复现 (M1.5)
+
+> 完整设计: [docs/design/data-pipeline-lineage.md](./docs/design/data-pipeline-lineage.md) §12
+
+仓库自带完整 6 阶段 sample fixtures (GCS csv / Airflow DAG / Flink SQL / MEX io.yaml / Superset yaml / ClickHouse DDL),
+**无需任何云凭证** 即可端到端跑通:
+
+```bash
+# 1. 起 API (PG + Redis 用 docker compose)
+make api-dev
+
+# 2. 在另一个终端, 一键跑 6 阶段管道 (fixture 模式)
+cd idm
+python trigger_pipeline_demo.py --api http://localhost:8000
+
+# 3. 单阶段 / 重扫
+python trigger_pipeline_demo.py --api http://localhost:8000 --stage 3
+python trigger_pipeline_demo.py --api http://localhost:8000 --rescan
+
+# 4. CI / 定时 (Bash / Batch)
+bash scripts/rescan_pipeline.sh --full          # Linux/macOS
+scripts\rescan_pipeline.bat --full              # Windows
+```
+
+**样例文件**:
+- `fixtures/pipeline-demo/gcs/company-{raw,model-input,model-output}/orders/2026/06/*.csv`
+- `fixtures/pipeline-demo/github/company/dwh/dags/etl_orders_daily.py`
+- `fixtures/pipeline-demo/github/company/dwh/flink_jobs/{orders_preprocess,load_orders_risk_to_clickhouse}.sql`
+- `fixtures/pipeline-demo/github/company/mex-models/orders/io.yaml`
+- `fixtures/pipeline-demo/github/company/superset-export/dashboards.yml`
+- `deploy/docker/seed-shop.sql` (ClickHouse DDL + 数据)
+- `use_cases/shop-orders-mex-pipeline.yml` (完整 6 阶段 Use Case)
+
+**全离线端到端验证** (无需起 API):
+```bash
+cd apps/api
+MOCK_GCS_ROOT="$PWD/../fixtures/pipeline-demo/gcs" \
+MOCK_GITHUB_ROOT="$PWD/../fixtures/pipeline-demo/github" \
+uv run --no-progress python -m idm_api.verify_pipeline_fixtures
+# 预期 9/9 stages passed
+```
+
 ## 许可证
 
 Internal — TBD

@@ -44,7 +44,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from idm_api.skills.mcp import get_github_mcp
 from idm_api.skills.registry import SkillContext, SkillResult, SkillOutput, skill
 from idm_kg.models.ai_suggestion import AISuggestion
+from idm_kg.models.database import Database
 from idm_kg.models.pipeline import Pipeline
+from idm_kg.models.schema import Schema
+from idm_kg.models.service import Service
 from idm_kg.models.table_asset import TableAsset
 from idm_kg.models.table_lineage import TableLineage
 
@@ -132,6 +135,37 @@ async def _upsert_pipeline(
     return row.id
 
 
+async def _ensure_mex_namespace(db: AsyncSession) -> UUID:
+    """为 MEX IO 端口准备 service -> database -> schema (idempotent).
+
+    路径: service='mex' -> database='mex_models' -> schema='default'
+    """
+    stmt = select(Service).where(Service.name == "mex")
+    svc = (await db.execute(stmt)).scalar_one_or_none()
+    if svc is None:
+        svc = Service(id=uuid4(), name="mex", type="mex",
+                      description="MEX (Model Execution) 黑盒模型服务")
+        db.add(svc)
+        await db.flush()
+
+    stmt = select(Database).where(Database.service_id == svc.id, Database.name == "mex_models")
+    db_obj = (await db.execute(stmt)).scalar_one_or_none()
+    if db_obj is None:
+        db_obj = Database(id=uuid4(), service_id=svc.id, name="mex_models",
+                          description="MEX 模型 IO 声明集合")
+        db.add(db_obj)
+        await db.flush()
+
+    stmt = select(Schema).where(Schema.database_id == db_obj.id, Schema.name == "default")
+    sch = (await db.execute(stmt)).scalar_one_or_none()
+    if sch is None:
+        sch = Schema(id=uuid4(), database_id=db_obj.id, name="default",
+                     description="MEX IO 端口默认 schema")
+        db.add(sch)
+        await db.flush()
+    return sch.id
+
+
 async def _lookup_or_create_mex_io_asset(
     db: AsyncSession, fqn: str, name: str, kind: str
 ) -> UUID | None:
@@ -142,9 +176,10 @@ async def _lookup_or_create_mex_io_asset(
     row = (await db.execute(stmt)).scalar_one_or_none()
     if row is not None:
         return row.id
-    # 实际生产: 应该绑定 schema_id; 这里允许 null schema_id (M1.5 兼容)
+    sch_id = await _ensure_mex_namespace(db)
     row = TableAsset(
         id=uuid4(),
+        schema_id=sch_id,
         name=name,
         fqn=fqn,
         asset_type="table",
@@ -186,11 +221,12 @@ async def parse_mex_io(ctx: SkillContext, **inputs: Any) -> SkillResult:
         return SkillResult(ok=False, output=SkillOutput(), error=f"invalid repo: {repo}")
 
     gh = get_github_mcp()
-    if not gh.has_token:
+    use_local = gh._use_local  # M1.5 演示
+    if not gh.has_token and not use_local:
         return SkillResult(
             ok=False,
             output=SkillOutput(),
-            error="MCP_GITHUB_TOKEN not set",
+            error="MCP_GITHUB_TOKEN not set and MOCK_GITHUB_ROOT is empty",
         )
 
     items: list[dict[str, Any]] = []
@@ -199,7 +235,10 @@ async def parse_mex_io(ctx: SkillContext, **inputs: Any) -> SkillResult:
         if not p.lower().endswith((".yaml", ".yml")):
             continue
         try:
-            content = await gh.get_file(owner=owner, repo=repo_name, ref=ref, path=p)
+            if use_local:
+                content = await gh.get_file_local(owner=owner, repo=repo_name, ref=ref, path=p)
+            else:
+                content = await gh.get_file(owner=owner, repo=repo_name, ref=ref, path=p)
         except Exception:  # noqa: BLE001
             skipped += 1
             continue

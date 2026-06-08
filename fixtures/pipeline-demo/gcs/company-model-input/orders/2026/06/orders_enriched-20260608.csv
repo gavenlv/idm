@@ -1,0 +1,6 @@
+order_id,user_id,order_date,total_amount,currency,status,item_count,gross_amount,net_amount,tax_amount,payment_method,is_first_order,days_since_signup
+ORD-20260608-0001,U10001,2026-06-08,328.50,CNY,paid,3,328.50,300.46,28.04,alipay,false,420
+ORD-20260608-0002,U10002,2026-06-08,1099.00,CNY,paid,5,1099.00,1005.50,93.50,wechat_pay,true,12
+ORD-20260608-0003,U10003,2026-06-08,45.20,CNY,refunded,1,45.20,41.37,3.83,credit_card,false,890
+ORD-20260608-0004,U10004,2026-06-08,876.30,CNY,paid,8,876.30,801.83,74.47,alipay,false,1500
+ORD-20260608-0005,U10005,2026-06-08,212.00,CNY,pending,2,212.00,194.00,18.00,credit_card,true,5

@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import clickhouse_connect
@@ -287,6 +288,89 @@ class GitHubMCP:
             )
         return out
 
+    # === 本地 fixture 模式 (M1.5 演示 — 离线 / 无 token 也能跑) ===
+    @property
+    def _local_root(self) -> Path | None:
+        """如果 settings.mock_github_root 设置且存在, 返回该路径."""
+        if not self._settings.mock_github_root:
+            return None
+        p = Path(self._settings.mock_github_root).expanduser().resolve()
+        return p if p.exists() else None
+
+    @property
+    def _use_local(self) -> bool:
+        return self._local_root is not None
+
+    def _local_repo_dir(self, owner: str, repo: str) -> Path | None:
+        root = self._local_root
+        if root is None:
+            return None
+        p = root / owner / repo
+        return p if p.exists() else None
+
+    async def list_files_local(
+        self, owner: str, repo: str, ref: str = "HEAD", path: str = ""
+    ) -> list[dict[str, Any]]:
+        rdir = self._local_repo_dir(owner, repo)
+        if rdir is None:
+            return []
+        base = rdir / path if path else rdir
+        if not base.exists():
+            return []
+        # 路径直接指向文件: 单条结果
+        if base.is_file():
+            st = base.stat()
+            return [
+                {
+                    "name": base.name,
+                    "path": str(base.relative_to(rdir)).replace("\\", "/"),
+                    "type": "file",
+                    "size": st.st_size,
+                    "sha": "",
+                }
+            ]
+        out: list[dict[str, Any]] = []
+        for child in sorted(base.iterdir()):
+            if child.name.startswith("."):
+                continue
+            kind = "dir" if child.is_dir() else "file"
+            st = child.stat() if child.exists() else None
+            out.append(
+                {
+                    "name": child.name,
+                    "path": str(child.relative_to(rdir)).replace("\\", "/"),
+                    "type": kind,
+                    "size": st.st_size if st else 0,
+                    "sha": "",
+                }
+            )
+        return out
+
+    async def get_file_local(
+        self, owner: str, repo: str, ref: str, path: str
+    ) -> str:
+        rdir = self._local_repo_dir(owner, repo)
+        if rdir is None:
+            return ""
+        p = rdir / path
+        if not p.is_file():
+            return ""
+        return p.read_text(encoding="utf-8", errors="replace")
+
+    async def list_tree_local(
+        self, owner: str, repo: str, ref: str = "HEAD", recursive: bool = True
+    ) -> list[dict[str, Any]]:
+        rdir = self._local_repo_dir(owner, repo)
+        if rdir is None:
+            return []
+        out: list[dict[str, Any]] = []
+        for p in sorted(rdir.rglob("*")):
+            if not p.is_file() or any(part.startswith(".") for part in p.parts):
+                continue
+            rel = str(p.relative_to(rdir)).replace("\\", "/")
+            out.append({"path": rel, "type": "blob", "sha": ""})
+        return out
+
 
 # === Sidecar registry (process-wide singletons) ===
 _mcp_clients: dict[str, Any] = {}
@@ -550,7 +634,9 @@ class GcsMCP:
                     "key": b.name,
                     "fqn": f"gcs://{b.bucket.name}/{b.name}",
                     "size": b.size,
-                    "updated": b.updated.isoformat() if b.updated else None,
+                    "updated": b.updated if isinstance(b.updated, str) else (
+                        b.updated.isoformat() if b.updated else None
+                    ),
                     "content_type": b.content_type,
                     "md5": b.md5_hash,
                 }
@@ -569,7 +655,9 @@ class GcsMCP:
                 "key": key,
                 "fqn": f"gcs://{bucket}/{key}",
                 "size": b.size,
-                "updated": b.updated.isoformat() if b.updated else None,
+                "updated": b.updated if isinstance(b.updated, str) else (
+                    b.updated.isoformat() if b.updated else None
+                ),
                 "content_type": b.content_type,
                 "md5": b.md5_hash,
             }
@@ -636,13 +724,135 @@ class GcsMCP:
 
 
 class _MockGcsClient:
-    """测试 / 离线环境使用的 GCS Mock."""
+    """测试 / 离线环境使用的 GCS Mock.
+
+    模式 (按 settings.mock_gcs_root 是否设置自动选择):
+    - 离线 + 真实本地目录: 扫描 `settings.mock_gcs_root` 下的 <bucket>/<key> 树
+    - 离线 + 缺根: 返回空 (向后兼容)
+    """
+
+    def __init__(self) -> None:
+        from idm_api.config import get_settings as _gs
+
+        s = _gs()
+        self._root: Path | None = (
+            Path(s.mock_gcs_root).expanduser().resolve() if s.mock_gcs_root else None
+        )
+        self._mode = "fixture" if self._root and self._root.exists() else "empty"
 
     def list_buckets(self):  # noqa: ANN201
-        return []
+        if self._mode != "fixture" or self._root is None:
+            return []
+        out: list[Any] = []
+        for child in sorted(self._root.iterdir()):
+            if child.is_dir() and not child.name.startswith("."):
+                out.append(_BucketStub(name=child.name))
+        return out
 
     def list_blobs(self, bucket, prefix="", max_results=200):  # noqa: ANN201
-        return []
+        if self._mode != "fixture" or self._root is None:
+            return []
+        bdir = self._root / bucket
+        if not bdir.exists():
+            return []
+        prefix = prefix.strip("/")
+        out: list[Any] = []
+        for p in sorted(bdir.rglob("*")):
+            if not p.is_file():
+                continue
+            rel = p.relative_to(bdir).as_posix()
+            if prefix and not rel.startswith(prefix):
+                continue
+            st = p.stat()
+            out.append(
+                _BlobStub(
+                    bucket=bucket,
+                    name=rel,
+                    size=st.st_size,
+                    updated=_iso(st.st_mtime),
+                    content_type=_guess_content_type(p.name),
+                    md5="",
+                )
+            )
+            if len(out) >= max_results:
+                break
+        return out
+
+    def bucket(self, bucket_name: str):  # noqa: ANN201
+        return _BucketHandle(self._root, bucket_name)
+
+
+class _BucketStub:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _BlobStub:
+    def __init__(self, *, bucket: str, name: str, size: int, updated: str, content_type: str, md5: str) -> None:
+        self.bucket = _BucketStub(bucket)
+        self.name = name
+        self.size = size
+        self.updated = updated
+        self.content_type = content_type
+        self.md5_hash = md5
+
+
+class _BucketHandle:
+    def __init__(self, root: Path | None, name: str) -> None:
+        self._root = root
+        self._name = name
+        self.name = name
+
+    def get_blob(self, key: str):  # noqa: ANN201
+        if self._root is None:
+            return None
+        p = self._root / self._name / key
+        if not p.is_file():
+            return None
+        st = p.stat()
+        b = _BlobStub(
+            bucket=self._name,
+            name=key,
+            size=st.st_size,
+            updated=_iso(st.st_mtime),
+            content_type=_guess_content_type(p.name),
+            md5="",
+        )
+        # 让 blob 自身能调 .bucket.name / .download_as_bytes
+        b.download_as_bytes = _make_downloader(self._root / self._name / key)  # type: ignore[attr-defined]
+        return b
+
+
+def _make_downloader(path: Path):  # noqa: ANN201
+    def _dl(start: int = 0, end: int | None = None) -> bytes:
+        if not path.is_file():
+            return b""
+        with open(path, "rb") as f:
+            f.seek(start)
+            if end is None:
+                return f.read()
+            return f.read(end - start + 1)
+
+    return _dl
+
+
+def _iso(ts: float) -> str:
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+
+def _guess_content_type(name: str) -> str:
+    n = name.lower()
+    if n.endswith(".parquet"):
+        return "application/octet-stream"
+    if n.endswith(".csv"):
+        return "text/csv"
+    if n.endswith(".json"):
+        return "application/json"
+    if n.endswith((".sql", ".yml", ".yaml", ".py", ".txt", ".md")):
+        return "text/plain"
+    return "application/octet-stream"
 
 
 def get_gcs_mcp() -> GcsMCP:

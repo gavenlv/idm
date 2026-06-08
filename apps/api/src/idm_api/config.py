@@ -94,6 +94,12 @@ class Settings(BaseSettings):
     # === Redis ===
     redis_url: str = "redis://localhost:6379/0"
 
+    # === 本地 fixture 模式 (离线 / 演示 / e2e 测试) ===
+    # 当 google.cloud.storage 不可用时, GCS MCP 会回退到 mock.
+    # 在 mock 模式下, 如果下面两个路径存在, 优先用本地文件模拟 GCS / GitHub 仓库.
+    mock_gcs_root: str = ""         # 形如 D:\\workspace\\github-ai\\idm\\fixtures\\gcs
+    mock_github_root: str = ""      # 形如 D:\\workspace\\github-ai\\idm\\fixtures\\github
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def cors_origins_list(self) -> list[str]:

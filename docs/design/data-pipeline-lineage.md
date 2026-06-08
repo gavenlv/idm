@@ -694,4 +694,160 @@ flowchart TB
 
 ---
 
+## 12. 端到端样例 Fixtures & 触发脚本 (M1.5 2026-06-08)
+
+为了让团队"开箱即用"地复现整条 6 阶段管道, IDM 自带完整 sample 数据 + 触发脚本。
+所有样例都按真实生产口径写在仓库里, 通过环境变量切换 **离线 fixture 模式 / 真实 MCP 模式**。
+
+### 12.1 样例文件清单 (仓库内)
+
+```
+idm/fixtures/pipeline-demo/
+├── gcs/                                  # === 阶段 1/2/4: GCS 离线 fixture (MOCK_GCS_ROOT) ===
+│   ├── company-raw/orders/2026/06/       # 阶段 1 — 原始订单 CSV
+│   │   ├── orders-20260608.csv
+│   │   └── orders-20260609.csv
+│   ├── company-model-input/orders/2026/06/   # 阶段 2 — Flink 富化输出
+│   │   └── orders_enriched-20260608.csv
+│   └── company-model-output/orders/2026/06/  # 阶段 4 — MEX 风控输出
+│       └── orders_risk-20260608.csv
+│
+└── github/                               # === 阶段 1/3/5/6: GitHub 离线 fixture (MOCK_GITHUB_ROOT) ===
+    └── company/
+        ├── dwh/
+        │   ├── dags/
+        │   │   └── etl_orders_daily.py   # 阶段 1 — Airflow DAG (7 tasks)
+        │   └── flink_jobs/
+        │       ├── orders_preprocess.sql         # 阶段 1 — Flink preprocess
+        │       └── load_orders_risk_to_clickhouse.sql   # 阶段 5 — Flink load → CH
+        ├── mex-models/
+        │   └── orders/io.yaml             # 阶段 3 — MEX 黑盒 IO 声明
+        └── superset-export/
+            └── dashboards.yml             # 阶段 6 — Superset yaml 导出
+```
+
+配套资源:
+- `idm/use_cases/shop-orders-mex-pipeline.yml` — 完整 6 阶段 Use Case 编排
+- `idm/deploy/docker/seed-shop.sql` — ClickHouse 样例 DDL + 数据 (含 `shop.fct_orders_risk_daily` 等 5 张表)
+- `idm/trigger_pipeline_demo.py` — 一次性触发脚本 (全 6 阶段 / 单阶段 / 重扫)
+- `idm/scripts/rescan_pipeline.{sh,bat}` — CI 友好的重扫脚本 (含超时控制)
+
+### 12.2 三种触发方式
+
+#### 方式 A: 端到端无 API (最快, 适合本地 / CI)
+
+```bash
+# 1) 切到 idm 仓库根
+cd idm
+
+# 2) 离线模式跑 (无需 GCS / GitHub / ClickHouse 凭证)
+#    设置 MOCK_GCS_ROOT / MOCK_GITHUB_ROOT 后, MCP 自动走本地 fixture
+cd apps/api
+MOCK_GCS_ROOT="<root>/idm/fixtures/pipeline-demo/gcs" \
+MOCK_GITHUB_ROOT="<root>/idm/fixtures/pipeline-demo/github" \
+uv run --no-progress python -m idm_api.verify_pipeline_fixtures
+```
+
+预期输出 (9/9 全过):
+```
+=== SUMMARY ===
+  [OK]   stage 1: GCS raw
+  [OK]   stage 1: Airflow DAG
+  [OK]   stage 1: Flink preprocess
+  [OK]   stage 2: GCS model-input
+  [OK]   stage 3: MEX io.yaml
+  [OK]   stage 4: GCS model-output
+  [OK]   stage 5: Flink load
+  [OK]   stage 5: ClickHouse
+  [OK]   stage 6: Superset export (dry_run)
+9/9 stages passed
+```
+
+#### 方式 B: 触发 IDM API (生产模式)
+
+```bash
+# 1) 起 API
+cd idm/apps/api
+uv run --no-progress uvicorn idm_api.main:app --host 0.0.0.0 --port 8000
+
+# 2) 在另一个终端, 触发全 6 阶段 (一次性 skill: analyze_data_pipeline)
+cd idm
+MOCK_GCS_ROOT="<root>/idm/fixtures/pipeline-demo/gcs" \
+MOCK_GITHUB_ROOT="<root>/idm/fixtures/pipeline-demo/github" \
+uv run --no-progress python trigger_pipeline_demo.py --api http://localhost:8000
+```
+
+#### 方式 C: 单阶段触发 / 重新扫描
+
+```bash
+# 单阶段 (例如只想重扫阶段 3 MEX)
+python trigger_pipeline_demo.py --api http://localhost:8000 --stage 3
+
+# 重新扫描 (idempotent — 资产/血缘 upsert)
+python trigger_pipeline_demo.py --api http://localhost:8000 --rescan
+
+# 组合: 重扫阶段 5 (Flink load + ClickHouse)
+python trigger_pipeline_demo.py --api http://localhost:8000 --stage 5 --rescan
+```
+
+#### 方式 D: CI / Cron (Windows + Linux)
+
+Linux / macOS:
+```bash
+# 每 6 小时自动重扫整条管道, 超时 30s 强制结束
+cd idm
+bash scripts/rescan_pipeline.sh --full          # 整条 6 阶段
+bash scripts/rescan_pipeline.sh --stage 3       # 只扫 MEX
+```
+
+Windows (PowerShell / Git Bash):
+```bat
+:: 在 Git Bash 或 WSL 内:
+bash /d/workspace/github-ai/idm/scripts/rescan_pipeline.sh --full
+
+:: 或在 PowerShell:
+& "D:\workspace\github-ai\idm\scripts\rescan_pipeline.bat" --full
+```
+
+### 12.3 验证 & 调试清单
+
+| 想看什么 | 跑什么 |
+| --- | --- |
+| 6 阶段全部过一遍 (无需起 API) | `python -m idm_api.verify_pipeline_fixtures` |
+| 单元 / 集成测试 (含 BDD) | `cd apps/api && uv run pytest tests/bdd/ tests/ -v` |
+| 看某个 stage 写了多少资产 | 跑完 verify 后查 SQLite: `sqlite3 /tmp/idm_verify_*.db "select pipeline_stage, count(*) from table_assets group by 1;"` |
+| 重置 (清空 SQLite) | `rm -f /tmp/idm_verify_*.db` |
+| 切真实 GCS (非 fixture) | `unset MOCK_GCS_ROOT`, 并在 `.env` 配置 `GCS_BUCKET_*` / `GOOGLE_APPLICATION_CREDENTIALS` |
+| 切真实 GitHub | `unset MOCK_GITHUB_ROOT`, 并在 `.env` 设置 `MCP_GITHUB_TOKEN=<pat>` |
+| 切真实 ClickHouse | `cd deploy/docker && docker compose -f compose.dev.yml up clickhouse -d`, 并在 `.env` 设置 `CLICKHOUSE_HOST=localhost` |
+| 切真实 Superset | `unset MOCK_SUPERSET`, 在 `.env` 设置 `SUPERSET_URL` / `SUPERSET_USERNAME` / `SUPERSET_PASSWORD` |
+
+### 12.4 fixture ↔ use_case ↔ 资产 三方对齐
+
+| Use Case source.id | fixture 路径 | 触发的 Skill | 写出的资产 / 血缘 |
+| --- | --- | --- | --- |
+| `gcs-raw` | `gcs/company-raw/orders/2026/06/*.csv` | `discover_gcs_assets` (stage=1) | `gcs://company-raw/orders/2026/06/...` (asset_subtype=`gcs_object`) |
+| `gh-airflow` | `github/company/dwh/dags/etl_orders_daily.py` | `parse_airflow_dag` (stage=1) | `airflow://etl_orders_daily/*` (pipeline + tasks) |
+| `gh-flink-preprocess` | `github/company/dwh/flink_jobs/orders_preprocess.sql` | `parse_flink_job` (stage=1, transform_subtype=preprocess) | lineage: `gcs.company_raw.default.orders_raw` → `gcs.company_model_input.default.orders_enriched` |
+| `gcs-model-input` | `gcs/company-model-input/orders/2026/06/*.csv` | `discover_gcs_assets` (stage=2) | `gcs://company-model-input/orders/2026/06/...` |
+| `gh-mex` | `github/company/mex-models/orders/io.yaml` | `parse_mex_io` (stage=3) | pipeline: `orders_risk_model` + `orders_lifetime_value_model` (type=`mex_model`); IO 端口 `mex://*/in` / `mex://*/out` |
+| `gcs-model-output` | `gcs/company-model-output/orders/2026/06/*.csv` | `discover_gcs_assets` (stage=4) | `gcs://company-model-output/orders/2026/06/...` |
+| `gh-flink-load` | `github/company/dwh/flink_jobs/load_orders_risk_to_clickhouse.sql` | `parse_flink_job` (stage=5, transform_subtype=load_ch) | lineage: `gcs.company_model_output.default.orders_risk` → `clickhouse_prod.shop.default.fct_orders_risk_daily` |
+| `clickhouse-shop` | (走 MCP: clickhouse) | `discover_clickhouse_assets` (stage=5) | `clickhouse-prod.shop.default.fct_orders_*` (asset_subtype=`clickhouse_table`) + 18 列 |
+| `superset-export` | `github/company/superset-export/dashboards.yml` | `parse_superset_dashboard` (stage=6, dry_run=false) | dashboard + chart + dataset 资产, 血缘 `fct_orders_risk_daily` → `superset://demo/ds.201` |
+
+### 12.5 故障排查
+
+| 现象 | 检查 |
+| --- | --- |
+| `[FAIL] GCS raw: err=GCS not ready` | `echo $MOCK_GCS_ROOT` 是否指向 `idm/fixtures/pipeline-demo/gcs` |
+| `[FAIL] parse_mex_io: MOCK_GITHUB_ROOT is empty` | `echo $MOCK_GITHUB_ROOT` 是否指向 `idm/fixtures/pipeline-demo/github` |
+| `sqlglot.errors.ParseError: Invalid expression / Unexpected token` | Flink SQL 中不能用连字符, 改用下划线 (如 `clickhouse-prod` → `clickhouse_prod`) |
+| `IntegrityError: NOT NULL constraint failed: table_assets.schema_id` | MEX / Flink 引用表已支持自动建 namespace (service='mex' / service='flink') |
+| Superset `superset_unreachable` | 单测用 `dry_run=true`; 真实环境需要 `SUPERSET_URL` + 凭证 |
+| ClickHouse `describe_table` 返回 `[]` | 真实 CH 必须存在该表; fixture 模式下应使用 `python -m idm_api.verify_pipeline_fixtures` 走 mock |
+| 血缘边没写出来 (edges_inferred=0) | 检查 source/sink FQN 是否在 KG 中已存在; Flink SQL 中 `INSERT INTO` 后的 FQN 必须先在 GCS/CH 发现阶段被创建 |
+
+---
+
 > 📌 **配套阅读**: [mcp-server-guide.md](./mcp-server-guide.md) · [skills-design.md](./skills-design.md) · [architecture.md](./architecture.md) · [AGENT_INSTRUCTIONS.md](../AGENT_INSTRUCTIONS.md) §16.5 自动化执行铁律

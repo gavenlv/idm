@@ -32,7 +32,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from idm_api.skills.mcp import get_github_mcp
 from idm_api.skills.registry import SkillContext, SkillResult, SkillOutput, skill
 from idm_kg.models.ai_suggestion import AISuggestion
+from idm_kg.models.database import Database
 from idm_kg.models.pipeline import Pipeline
+from idm_kg.models.schema import Schema
+from idm_kg.models.service import Service
 from idm_kg.models.table_asset import TableAsset
 from idm_kg.models.table_lineage import TableLineage
 
@@ -114,6 +117,37 @@ def _extract_table_refs_from_sql(sql: str) -> tuple[set[str], set[str]]:
                         parts.append(str(tbl.name))
                         sources.add(".".join(parts).lower())
     return sources, sinks
+
+
+async def _ensure_flink_namespace(db: AsyncSession) -> UUID:
+    """为 Flink 引用表准备 service -> database -> schema (idempotent).
+
+    service='flink' -> database='flink_jobs' -> schema='default'
+    """
+    stmt = select(Service).where(Service.name == "flink")
+    svc = (await db.execute(stmt)).scalar_one_or_none()
+    if svc is None:
+        svc = Service(id=uuid4(), name="flink", type="flink",
+                      description="Flink 任务引用的逻辑表")
+        db.add(svc)
+        await db.flush()
+
+    stmt = select(Database).where(Database.service_id == svc.id, Database.name == "flink_jobs")
+    db_obj = (await db.execute(stmt)).scalar_one_or_none()
+    if db_obj is None:
+        db_obj = Database(id=uuid4(), service_id=svc.id, name="flink_jobs",
+                          description="Flink 任务引用表集合")
+        db.add(db_obj)
+        await db.flush()
+
+    stmt = select(Schema).where(Schema.database_id == db_obj.id, Schema.name == "default")
+    sch = (await db.execute(stmt)).scalar_one_or_none()
+    if sch is None:
+        sch = Schema(id=uuid4(), database_id=db_obj.id, name="default",
+                     description="Flink 引用表默认 schema")
+        db.add(sch)
+        await db.flush()
+    return sch.id
 
 
 async def _upsert_table_asset(
@@ -205,19 +239,22 @@ async def parse_flink_job(ctx: SkillContext, **inputs: Any) -> SkillResult:
         return SkillResult(ok=False, output=SkillOutput(), error=f"invalid repo: {repo}")
 
     gh = get_github_mcp()
-    if not gh.has_token:
+    use_local = gh._use_local  # M1.5 演示: 本地 fixture 模式
+    if not gh.has_token and not use_local:
         return SkillResult(
             ok=False,
             output=SkillOutput(),
-            error="MCP_GITHUB_TOKEN not set",
+            error="MCP_GITHUB_TOKEN not set and MOCK_GITHUB_ROOT is empty",
         )
 
     # 1) 列文件
     all_files: list[str] = []
     for p in paths:
-        # 简化: 用 GitHub search/list API
         try:
-            files = await gh.list_files(owner=owner, repo=repo_name, ref=ref, path=p)
+            if use_local:
+                files = await gh.list_files_local(owner=owner, repo=repo_name, ref=ref, path=p)
+            else:
+                files = await gh.list_files(owner=owner, repo=repo_name, ref=ref, path=p)
             all_files.extend([f["path"] for f in files if f.get("type") == "file"])
         except Exception:  # noqa: BLE001
             pass
@@ -237,7 +274,10 @@ async def parse_flink_job(ctx: SkillContext, **inputs: Any) -> SkillResult:
         if not path.lower().endswith((".sql", ".flink.sql")):
             continue
         try:
-            sql_text = await gh.get_file(owner=owner, repo=repo_name, ref=ref, path=path)
+            if use_local:
+                sql_text = await gh.get_file_local(owner=owner, repo=repo_name, ref=ref, path=path)
+            else:
+                sql_text = await gh.get_file(owner=owner, repo=repo_name, ref=ref, path=path)
         except Exception:  # noqa: BLE001
             skipped += 1
             continue
@@ -258,6 +298,12 @@ async def parse_flink_job(ctx: SkillContext, **inputs: Any) -> SkillResult:
                 stage=stage,
                 source_url=source_url,
             )
+
+        # 3.6) ensure flink namespace + upsert source/sink table_assets
+        #  (没有这些 asset 就没法写血缘, 即使 SQL 解析对了)
+        flink_sch_id = await _ensure_flink_namespace(ctx.db)
+        for fqn in list(sources) + list(sinks):
+            await _upsert_table_asset(ctx.db, fqn=fqn, name=fqn.split(".")[-1], sch_id=flink_sch_id)
 
         # 4) 写血缘边
         for sink in sinks:
