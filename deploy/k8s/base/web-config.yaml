@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: idm-web-config
+  labels:
+    app.kubernetes.io/name: idm
+    app.kubernetes.io/component: web
+data:
+  # nginx.conf (SPA + /api 反代到 idm-api Service)
+  default.conf: |
+    server {
+        listen 80;
+        server_name _;
+        root /usr/share/nginx/html;
+        index index.html;
+
+        gzip on;
+        gzip_types text/css application/javascript application/json image/svg+xml;
+        gzip_min_length 1024;
+
+        # SPA
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+
+        # API 反代 (K8s service)
+        location /api/ {
+            proxy_pass http://idm-api.idm.svc.cluster.local:8080;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_read_timeout 90s;
+        }
+
+        location /health {
+            proxy_pass http://idm-api.idm.svc.cluster.local:8080/health;
+        }
+
+        # 静态资源缓存
+        location ~* \.(?:js|css|woff2?|ttf|svg|png|jpg|webp|ico)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }

@@ -1,0 +1,23 @@
+# 阿里云 ALB IngressClass
+# 集群里必须先安装 ack-alb-ingress 控制器
+#   https://help.aliyun.com/document_detail/207176.html
+# 阿里云控制台: 容器服务 ACK -> 运维管理 -> 组件管理 -> 搜索 "alb"
+# 装好后会自动创建 alb ingress class
+# 此处保留一份, 若 ACS 集群已存在则会被忽略
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: alb
+  annotations:
+    # 控制器类型 = 阿里云 ALB
+    ingressclass.kubernetes.io/is-default-class: "false"
+spec:
+  controller: ingress.k8s.alibabacloud/alb
+---
+# 备选: nginx ingress (若 ACS 集群没有 alb)
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: nginx
+spec:
+  controller: k8s.io/ingress-nginx

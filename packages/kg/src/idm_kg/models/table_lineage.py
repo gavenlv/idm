@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Float, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Float, ForeignKey, Index, SmallInteger, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -34,6 +34,10 @@ class TableLineage(Base, UUIDMixin, TimestampMixin):
     confidence: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     source: Mapped[str] = mapped_column(String(32), default="ai_inferred", nullable=False)
     # dbt_manifest / airflow_dag / superset_export / sqlglot / ai_inferred
+    # 真实管道: flink_sql / airflow_task / mex_inference / gcs_copy / superset_query / dbt_ref
+    transform_subtype: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # 6 阶段管道标号: 1|2|3|4|5|6 (强约束; 用于 6 阶段真实管道用例)
+    pipeline_stage: Mapped[int | None] = mapped_column(SmallInteger, nullable=True, index=True)
     extra: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
     upstream_table: Mapped["TableAsset"] = relationship(

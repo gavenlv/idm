@@ -31,6 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from idm_api.skills.registry import SkillContext, SkillResult, SkillOutput, skill
+from idm_kg.models.pipeline import Pipeline
 from idm_kg.models.schema import Schema
 from idm_kg.models.service import Service
 from idm_kg.models.table_asset import TableAsset
@@ -171,6 +172,19 @@ def _extract_default_args_owner(dag_node: ast.Call) -> str | None:
     return None
 
 
+def _validate_stage(stage: Any) -> int:
+    """6 阶段管道标号; Airflow DAG 固定在阶段 1 (上游预处理).
+
+    Returns the validated int stage. Raises ValueError on invalid.
+    """
+    if stage is None or stage == "":
+        return 1
+    s = int(stage)
+    if s != 1:
+        raise ValueError(f"stage for parse_airflow_dag must be 1, got {s}")
+    return s
+
+
 async def _ensure_service_schema(
     db: AsyncSession, *, service_name: str, schema_name: str
 ) -> tuple[Service, Schema]:
@@ -205,12 +219,18 @@ async def _ensure_service_schema(
     return svc, sch
 
 
-@skill(name="parse_airflow_dag", version=1, agent="lineage")
+@skill(name="parse_airflow_dag", version=2, agent="lineage")
 async def parse_airflow_dag(ctx: SkillContext, **inputs: Any) -> SkillResult:
     dag_file_path: str = inputs.get("dag_file_path") or ""
     dag_id_filter: str = inputs.get("dag_id") or ""
     write_lineage: bool = bool(inputs.get("write_lineage", True))
     apply: bool = bool(inputs.get("apply", True))
+    # === 6 阶段管道 (2026-06-08 M1.5 强化) ===
+    try:
+        stage = _validate_stage(inputs.get("stage", 1))
+    except ValueError as e:
+        return SkillResult(ok=False, output=SkillOutput(), error=str(e))
+    pipeline_name: str | None = inputs.get("pipeline_name")
 
     if not dag_file_path:
         return SkillResult(ok=False, output=SkillOutput(), error="missing required input: 'dag_file_path'")
@@ -225,7 +245,7 @@ async def parse_airflow_dag(ctx: SkillContext, **inputs: Any) -> SkillResult:
     if not dags:
         return SkillResult(
             ok=True,
-            output=SkillOutput(items=[], summary={"reason": "no DAGs matched", "file": dag_file_path}),
+            output=SkillOutput(items=[], summary={"reason": "no DAGs matched", "file": dag_file_path, "stage": stage}),
         )
 
     items: list[dict[str, Any]] = []
@@ -245,9 +265,37 @@ async def parse_airflow_dag(ctx: SkillContext, **inputs: Any) -> SkillResult:
                     "dag_id": dag["dag_id"],
                     "tasks": [t["task_id"] for t in dag["tasks"]],
                     "status": "dry_run",
+                    "stage": stage,
                 }
             )
             continue
+
+        # 0) 写 pipeline 实体 (type=airflow_dag, stage=1) — 至少 1 个 DAG 写 1 次
+        if pipeline_name or dag["dag_id"]:
+            try:
+                from idm_kg.models.pipeline import Pipeline
+                pl_name = pipeline_name or f"airflow::{dag['dag_id']}"
+                pl_row = (
+                    await ctx.db.execute(
+                        select(Pipeline).where(Pipeline.name == pl_name, Pipeline.type == "airflow_dag")
+                    )
+                ).scalar_one_or_none()
+                if pl_row is None:
+                    pl_row = Pipeline(
+                        id=__import__("uuid").uuid4(),
+                        name=pl_name,
+                        type="airflow_dag",
+                        stage=stage,
+                        source_code_url=f"file://{dag_file_path}",
+                        description=f"Airflow DAG {dag['dag_id']} ({len(dag['tasks'])} tasks)",
+                        config={"dag_id": dag["dag_id"], "schedule": dag.get("schedule_interval")},
+                    )
+                    ctx.db.add(pl_row)
+                else:
+                    if stage is not None:
+                        pl_row.stage = stage
+            except Exception:  # noqa: BLE001
+                logger.warning("parse_airflow_dag: failed to write pipeline %s", dag["dag_id"], exc_info=True)
 
         # 1) 每个 task 入一个 table_asset (asset_type=airflow_task)
         # 2) task 间顺序关系写入 lineage (transform_type=airflow_task)
@@ -266,8 +314,9 @@ async def parse_airflow_dag(ctx: SkillContext, **inputs: Any) -> SkillResult:
                     asset_type="airflow_task",
                     tier="normal",
                     status="active",
-                    description=f"Airflow task {t['task_id']} in DAG {dag['dag_id']} (operator={t['operator']})",
+                    description=f"Airflow task {t['task_id']} in DAG {dag['dag_id']} (operator={t['operator']}, stage={stage})",
                     description_source="imported",
+                    pipeline_stage=stage,
                     extra={"operator": t["operator"], "dag_id": dag["dag_id"]},
                 )
                 ctx.db.add(asset)
@@ -276,6 +325,8 @@ async def parse_airflow_dag(ctx: SkillContext, **inputs: Any) -> SkillResult:
                 created_tables += 1
                 status = "created"
             else:
+                if stage is not None:
+                    existing.pipeline_stage = stage
                 table_id = existing.id
                 updated_tables += 1
                 status = "updated"
@@ -287,6 +338,7 @@ async def parse_airflow_dag(ctx: SkillContext, **inputs: Any) -> SkillResult:
                     "table_id": str(table_id),
                     "fqn": fqn,
                     "status": status,
+                    "stage": stage,
                 }
             )
             # 收集 SQL 线索
@@ -320,6 +372,8 @@ async def parse_airflow_dag(ctx: SkillContext, **inputs: Any) -> SkillResult:
                             upstream_id=src["table_id"],
                             downstream_id=dst["table_id"],
                             transform_type="airflow_task",
+                            transform_subtype="dag_chain",
+                            pipeline_stage=stage,
                             job_id=f"{dag['dag_id']}::{t['task_id']}->{dag['tasks'][i+1]['task_id']}",
                             confidence=0.8,
                             source="airflow_dag",
@@ -342,6 +396,7 @@ async def parse_airflow_dag(ctx: SkillContext, **inputs: Any) -> SkillResult:
         "lineage_edges_skipped": lineage_skipped,
         "sql_evidence_count": len(sql_evidence),
         "sql_evidence_sample": sql_evidence[:5],
+        "stage": stage,
     }
     return SkillResult(
         ok=True,

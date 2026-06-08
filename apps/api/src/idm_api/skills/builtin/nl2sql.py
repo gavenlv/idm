@@ -66,13 +66,20 @@ async def _guard_schema(
         if stmt is None:
             continue
         for tbl in stmt.find_all(sqlglot.exp.Table):
-            # sqlglot 把 FQN 拆成 catalog.db.name; 拼回去再记
-            parts = [tbl.args.get(k) for k in ("catalog", "db", "name") if tbl.args.get(k)]
-            fqn = ".".join(parts).lower() if parts else (tbl.name or "").lower()
+            # sqlglot 在 ClickHouse 方言下倾向把最后一段解析为 `this` (列风格)，
+            # 所以拼装 FQN 时也要考虑 this。
+            parts: list[str] = []
+            for k in ("catalog", "db"):
+                v = tbl.args.get(k)
+                if v is None:
+                    continue
+                parts.append(str(v))
+            this = tbl.args.get("this") or tbl.name
+            if this is not None:
+                parts.append(str(this))
+            fqn = ".".join(parts).lower() if parts else ""
             if fqn:
                 referenced.add(fqn)
-            elif tbl.name:
-                referenced.add(tbl.name.lower())
 
     if not referenced:
         # 可能是子查询, 跳过严格检查
@@ -444,12 +451,19 @@ async def nl2sql(ctx: SkillContext, **inputs: Any) -> SkillResult:
         output=SkillOutput(
             items=items,
             summary={
+                "sql": sql,  # 方便 chatbi router / BDD 直接拿
+                "explanation": (llm_out.get("explanation") or "").strip()[:200],
+                "rationale": (llm_out.get("explanation") or "").strip()[:200],
+                "confidence": float(llm_out.get("confidence") or 0.0),
                 "passed_guards": len(passed),
                 "failed_guards": len(failed),
                 "executed": executed,
                 "row_count": row_count,
                 "service": service,
                 "llm_model": resp.get("model"),
+                "guard_warnings": [
+                    notes[k] for k in failed
+                ] + ([notes[k] for k in ("pii",) if k in notes and "已包含" in (notes[k] or "")] if not failed else []),
             },
             artifacts=[] if failed else ([] if not executed else [f"nl2sql:{row_count}rows"]),
         ),

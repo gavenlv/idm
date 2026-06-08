@@ -43,6 +43,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from idm_api.skills.registry import SkillContext, SkillOutput, SkillResult, skill
 from idm_api.skills.mcp import get_superset_mcp
 from idm_kg.models.database import Database
+from idm_kg.models.pipeline import Pipeline
 from idm_kg.models.schema import Schema
 from idm_kg.models.service import Service
 from idm_kg.models.table_asset import TableAsset
@@ -60,17 +61,22 @@ async def _ensure_table_asset(
     asset_type: str = "clickhouse_table",
     description: str | None = None,
     extra: dict[str, Any] | None = None,
+    pipeline_stage: int | None = None,
 ) -> str:
     """upsert TableAsset by fqn, 返回 id."""
-    stmt = pg_insert(TableAsset).values(
+    values = dict(
         fqn=fqn, name=name, schema_id=schema_id,
         asset_type=asset_type, description=description, extra=extra or {},
-    ).on_conflict_do_update(
+    )
+    if pipeline_stage is not None:
+        values["pipeline_stage"] = pipeline_stage
+    stmt = pg_insert(TableAsset).values(**values).on_conflict_do_update(
         index_elements=[TableAsset.fqn],
         set_={"name": name, "asset_type": asset_type,
               "description": description or TableAsset.description,
               "extra": extra or TableAsset.extra,
               "schema_id": schema_id,
+              "pipeline_stage": pipeline_stage if pipeline_stage is not None else TableAsset.pipeline_stage,
               "updated_at": TableAsset.__table__.c.updated_at},
     )
     await db.execute(stmt)
@@ -145,7 +151,17 @@ def _ch_service_name(db_name: str) -> str:
     return f"ch-{db_name}"
 
 
-@skill(name="parse_superset_dashboard", version=1, agent="lineage")
+def _validate_stage(stage):
+    """6 阶段管道标号; Superset 固定在阶段 6 (Report 消费)."""
+    if stage is None or stage == "":
+        return 6
+    s = int(stage)
+    if s != 6:
+        raise ValueError(f"stage for parse_superset_dashboard must be 6, got {s}")
+    return s
+
+
+@skill(name="parse_superset_dashboard", version=2, agent="lineage")
 async def run(ctx: SkillContext, **inputs: Any) -> SkillResult:
     """主入口."""
     dashboard_ids: list[int] = list(inputs.get("dashboard_ids") or [])
@@ -154,6 +170,12 @@ async def run(ctx: SkillContext, **inputs: Any) -> SkillResult:
     include_datasets: bool = bool(inputs.get("include_datasets", True))
     service_name: str = str(inputs.get("service_name") or "superset")
     dry_run: bool = bool(inputs.get("dry_run", False))
+    # === 6 阶段管道 (2026-06-08 M1.5 强化) ===
+    try:
+        stage = _validate_stage(inputs.get("stage", 6))
+    except ValueError as e:
+        return SkillResult(ok=False, output=SkillOutput(), error=str(e))
+    pipeline_name: str | None = inputs.get("pipeline_name")
 
     summary: dict[str, Any] = {
         "superset_reachable": False,
@@ -164,6 +186,7 @@ async def run(ctx: SkillContext, **inputs: Any) -> SkillResult:
         "chart_assets": 0,
         "dataset_assets": 0,
         "lineage_edges_added": 0,
+        "stage": stage,
         "errors": [],
     }
 
@@ -267,6 +290,7 @@ async def run(ctx: SkillContext, **inputs: Any) -> SkillResult:
         ds_asset_id = await _ensure_table_asset(
             db, fqn=ds_fqn, name=f"dataset_{did}", schema_id=schema_id,
             asset_type="superset_dataset", description=ds_desc, extra=extra,
+            pipeline_stage=stage,
         )
         summary["dataset_assets"] += 1
 
@@ -298,6 +322,8 @@ async def run(ctx: SkillContext, **inputs: Any) -> SkillResult:
                 stmt = pg_insert(TableLineage).values(
                     upstream_id=ds_asset_id, downstream_id=row.id,
                     transform_type="superset_dataset", source="superset_dataset",
+                    transform_subtype="dataset_to_table",
+                    pipeline_stage=stage,
                     confidence=0.95,
                 ).on_conflict_do_nothing(index_elements=[
                     TableLineage.upstream_id, TableLineage.downstream_id, TableLineage.transform_type,
@@ -365,8 +391,34 @@ async def run(ctx: SkillContext, **inputs: Any) -> SkillResult:
         await _ensure_table_asset(
             db, fqn=d_fqn, name=d_title, schema_id=schema_id,
             asset_type="superset_dashboard", description=d_desc, extra=extra,
+            pipeline_stage=stage,
         )
         summary["dashboard_assets"] += 1
+
+    # 0) 写 pipeline 实体 (type=superset_refresh, stage=6) — 至少 1 个
+    try:
+        pl_name = pipeline_name or f"superset::{service_name}::refresh"
+        pl_row = (
+            await db.execute(
+                select(Pipeline).where(Pipeline.name == pl_name, Pipeline.type == "superset_refresh")
+            )
+        ).scalar_one_or_none()
+        if pl_row is None:
+            pl_row = Pipeline(
+                id=__import__("uuid").uuid4(),
+                name=pl_name,
+                type="superset_refresh",
+                stage=stage,
+                source_code_url=f"{ss._base}/superset/dashboard/list/" if hasattr(ss, "_base") else None,
+                description=f"Superset dashboards refresh ({len(dashboards)} dashboards)",
+                config={"dashboards": len(dashboards), "service": service_name},
+            )
+            db.add(pl_row)
+        else:
+            if stage is not None:
+                pl_row.stage = stage
+    except Exception:  # noqa: BLE001
+        pass
 
     await db.commit()
 

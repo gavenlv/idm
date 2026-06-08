@@ -1,4 +1,4 @@
-﻿# IDM — Agent Instructions (核心单一文件)
+# IDM — Agent Instructions (核心单一文件)
 
 > **目的**：把 IDM (Intelligent Data Mesh) 平台**最核心、最不可违反**的设计决策
 > 汇总到 **一个文件**，以便后续任何实现（自己 / 同事 / 下游 Agent / 半年后回看）
@@ -136,22 +136,26 @@ tests:
 
 ### 4.3 内置 Skill 起步集 (Must Have)
 
-| Skill | 作用 |
-| --- | --- |
-| `discover_clickhouse_assets` | 扫 CH 库/表/列 + 采样 |
-| `discover_postgres_assets` | 扫 PG 资产 |
-| `parse_dbt_manifest` | 读 manifest.json → model + lineage |
-| `parse_airflow_dag` | 解析 DAG 拓扑 |
-| `parse_superset_export` | 解析 dashboard zip → chart/lineage |
-| `extract_sql_lineage` | SQL → 血缘 (sqlglot) |
-| `infer_table_description` | schema + sample → 描述 |
-| `classify_pii_columns` | 列名 + sample → PII 分类 |
-| `infer_owners` | 多信号 → Owner 建议 |
-| `detect_anomalies` | 画像 → 异常检测 |
-| `run_quality_check` | 断言 (freshness/volume/...) |
-| `compose_insight` | 事件 → 简报 |
-| `nl2sql` | 自然语言 → SQL (5 层 Guard) |
-| `resolve_entity` | 实体消歧 / 合并 |
+| Skill | 作用 | 适用阶段 |
+| --- | --- | --- |
+| `discover_clickhouse_assets` | 扫 CH 库/表/列 + 采样 | 5 |
+| `discover_postgres_assets` | 扫 PG 资产 | - |
+| `discover_gcs_assets` | 扫 GCS bucket + prefix, 推断 schema (parquet/csv/json/orc) | 1, 2, 4 |
+| `parse_dbt_manifest` | 读 manifest.json → model + lineage | - |
+| `parse_airflow_dag` | 解析 DAG 拓扑 (GitHub .py) | 1 |
+| `parse_flink_job` | 解析 Flink SQL (GitHub .sql) → source/sink/transform | 1, 5 |
+| `parse_mex_io` | 读 MEX io.yaml (黑盒声明) → 输入/输出 | 3 |
+| `parse_superset_dashboard` | 解析 dashboard yaml / Superset DB → chart/lineage | 6 |
+| `analyze_data_pipeline` | **端到端 1→6 串图, 写 pipeline_graph + ai_suggestion** | 1~6 |
+| `extract_sql_lineage` | SQL → 血缘 (sqlglot) | - |
+| `infer_table_description` | schema + sample → 描述 | - |
+| `classify_pii_columns` | 列名 + sample → PII 分类 | - |
+| `infer_owners` | 多信号 → Owner 建议 | - |
+| `detect_anomalies` | 画像 → 异常检测 (含健康分计算) | - |
+| `run_quality_check` | 断言 (freshness/volume/...) | - |
+| `compose_insight` | 事件 → 简报 (跨源复合事件) | - |
+| `nl2sql` | 自然语言 → SQL (5 层 Guard) | - |
+| `resolve_entity` | 实体消歧 / 合并 | - |
 
 ### 4.4 三层稳定性保障
 
@@ -177,18 +181,21 @@ flowchart LR
 
 ### 5.1 内置 MCP Server (起步必装)
 
-| MCP | 工具示例 | 部署 |
-| --- | --- | --- |
-| `clickhouse` | `list_databases` / `show_tables` / `describe_table` / `sample` / `list_query_log` | GCE Sidecar (贴近 CH) |
-| `github` | `get_file_contents` / `list_commits` / `git_blame` | IDM pod (官方) |
-| `gcs` | `list_objects` / `read_object` | IDM pod (官方) |
-| `superset_export` | `list_dashboards` / `parse_dashboard_yaml` | IDM pod (自研) |
-| `airflow` | `list_dags` / `get_dag` / `get_task` | IDM pod (自研 wrapper) |
-| `flink` | `list_jobs` / `get_job_plan` | IDM pod (自研 wrapper) |
-| `postgres` | `list_schemas` / `list_tables` | IDM pod |
-| `slack` / `lark` | `send_message` / `list_channels` | IDM pod (官方) |
-| `confluence` / `jira` | 知识 / 工单 | IDM pod (官方) |
-| **`idm-self`** | **反向暴露 IDM 能力给外部 Agent (Claude/Cursor)** | IDM pod (自研) |
+| MCP | 工具示例 | 部署 | 适用阶段 (6 阶段管道) |
+| --- | --- | --- | --- |
+| `clickhouse` | `list_databases` / `show_tables` / `describe_table` / `sample` / `list_query_log` | GCE Sidecar (贴近 CH) | 5 |
+| `github` | `get_file_contents` / `list_commits` / `git_blame` | IDM pod (官方) | 1, 2, 3, 5, 6 (读代码) |
+| `gcs` | `list_objects` / `get_metadata` / `read_object` / `infer_schema` | IDM pod (自研) | 1, 2, 4 (读 parquet/csv/json/orc) |
+| `superset_export` | `list_dashboards` / `parse_dashboard_yaml` | IDM pod (自研) | 6 (yaml 导出) |
+| `superset_db` | `list_dashboards` / `list_charts` / `list_datasets` / `get_dataset_columns` | IDM pod (自研) | 6 (运行时 DB) |
+| `airflow_db` | `list_dags` / `get_dag_runs` / `get_task_instances` | IDM pod (自研) | 1, 5 (执行历史) |
+| `flink` | `list_jobs` / `get_job_plan` / `get_job_sources_sinks` | IDM pod (自研) | 1, 2, 4, 5 (运行时 plan) |
+| `postgres` | `list_schemas` / `list_tables` | IDM pod | - |
+| `slack` / `lark` | `send_message` / `list_channels` | IDM pod (官方) | - |
+| `confluence` / `jira` | 知识 / 工单 | IDM pod (官方) | - |
+| **`idm-self`** | **反向暴露 IDM 能力给外部 Agent (Claude/Cursor)** | IDM pod (自研) | - |
+
+> **6 阶段真实管道 (GCS→AF+FK→GCS→MEX→GCS→FK2→CH→Superset)** 详见 [data-pipeline-lineage.md](./design/data-pipeline-lineage.md); 本表已按 6 阶段标号 MCP 的适用阶段。
 
 ### 5.2 三种部署模式
 
@@ -365,13 +372,39 @@ deliverables:
 
 | 字段 | 必填 | 用途 |
 | --- | --- | --- |
-| `sources[].type` | ✅ | `clickhouse` / `github` / `superset_export` / `airflow` / `flink` / ... |
+| `sources[].type` | ✅ | `clickhouse` / `github` / `superset_export` / `airflow` / `flink` / `gcs` / `airflow_db` / `superset_db` / ... |
 | `sources[].mcp` | ✅ | 调用的 MCP server 名 |
+| `sources[].stage` | - | 6 阶段管道标号 1\|2\|3\|4\|5\|6 (强约束, 用于数据管道用例) |
 | `analysis[].task` | ✅ | 对应 Skill 名 |
 | `analysis[].agent` | ✅ | 9 个 Specialist 中一个 |
 | `analysis[].depends_on` | - | DAG 依赖 |
 | `analysis[].schedule` | - | cron, 周期任务 |
 | `deliverables.insights[].channel` | - | `slack` / `lark` / `email` / `jira` |
+
+### 8.3 真实 6 阶段管道 (Real Data Pipeline)
+
+> **核心用例**: IDM 的目标业务是 **"看代码 + 读元数据"** 端到端学习整条数据管道, 不依赖业务埋点。
+
+```mermaid
+flowchart LR
+  S1[1. GCS 上游 parquet/csv<br/>→ Airflow + Flink 预处理] --> S2[2. Flink 写出 →<br/>GCS model-input]
+  S2 --> S3[3. MEX 黑盒推理]
+  S3 --> S4[4. MEX 写出 →<br/>GCS model-output]
+  S4 --> S5[5. Flink load →<br/>ClickHouse reporting]
+  S5 --> S6[6. Superset<br/>Dashboard/Chart/Dataset]
+```
+
+| 阶段 | 资产 / 系统 | 轨道 A (Skill 读代码) | 轨道 B (MCP 读元数据) |
+| --- | --- | --- | --- |
+| 1 | GCS raw + Airflow + Flink preprocess | `parse_airflow_dag`, `parse_flink_job` | `gcs`, `airflow_db` |
+| 2 | GCS model-input | (Flink 写出) | `gcs` |
+| 3 | MEX (黑盒) | `parse_mex_io` (io.yaml) | - |
+| 4 | GCS model-output | - | `gcs` |
+| 5 | Flink load + ClickHouse | `parse_flink_job` | `clickhouse`, `flink` |
+| 6 | Superset | `parse_superset_dashboard` | `superset_db`, `superset_export` |
+
+> **双轨对齐**: 静态代码 + 运行时元数据 → 置信度融合 → 不一致进 `ai_suggestion.pending` 人工 review。
+> **详细设计**: [data-pipeline-lineage.md](./design/data-pipeline-lineage.md) (含完整 YAML 模板、Skill 实现、阶段 × 资产 × 血缘速查表)。
 
 ---
 
@@ -522,6 +555,46 @@ flowchart LR
 
 ---
 
+## 16.5 自动化执行铁律 (Auto-Execution Rules — 2026-06-08 增)
+
+> **目的**：让 Agent 在执行 IDM 任务时 **不阻塞、不卡死、不必用户反复确认**,
+> **所有 shell 命令、测试、构建、部署 均自动后台运行**, 出错再回退/重试。
+
+### 16.5.1 命令运行规约
+
+| 规则 | 含义 | 反例 |
+| --- | --- | --- |
+| **必须 `timeout 30`** | **任何 shell 命令必须包 `timeout 30s` (或 `30`)**, 超过 30s 即视为失败 | ❌ `pytest ...` (无超时) — 容易卡死 |
+| **`blocking=false` 后台跑** | 跑测试 / build / 拉镜像 / `kubectl apply` / 长时间命令, **必须 `blocking=false`**, 然后 `CheckCommandStatus` 轮询 | ❌ `blocking=true` 等 5 分钟 |
+| **30s 没回包立刻继续** | 超时后 **不重试同一命令**, 立刻 `proceed to next step`, 把日志留在 `apps/.tmp/`, 用户需要时再回看 | ❌ 重试 3 次同一卡住命令 |
+| **失败不中断** | 单条命令失败 → **记录 + 继续**, 不要 `set -e` 一把全停; 留 batch report 末尾统一报告 | ❌ `&&` 链式全停 |
+| **幂等** | 所有部署 / 写库命令要幂等 (`kubectl apply` / `alembic upgrade head` / `upsert`), 重复跑不爆 | ❌ `CREATE TABLE` 必爆 |
+| **不要求交互输入** | 任何命令 **不允许弹交互**; 缺信息时用 placeholder + 警告日志, **不要卡住问** | ❌ `npm create vite@latest .` (会卡) |
+| **错误日志可定位** | 长命令输出 `tee` 到 `apps/.tmp/cmd-<ts>.log` + `cmd-<ts>.err` | ❌ 输出扔掉, 出问题找不回 |
+
+### 16.5.2 标准命令模板 (Agent 内部使用)
+
+```bash
+# 短命令 (<10s, 同步即可)
+timeout 30s <cmd>
+
+# 长命令 (>=10s, 必须后台)
+timeout 30s <cmd> > apps/.tmp/cmd-$(date +%s).log 2> apps/.tmp/cmd-$(date +%s).err &
+echo $! > apps/.tmp/cmd.pid
+# 30s 后:
+kill -0 $(cat apps/.tmp/cmd.pid) 2>/dev/null && kill $(cat apps/.tmp/cmd.pid) || echo "ok finished"
+```
+
+### 16.5.3 Agent 自检清单 (每轮必跑)
+
+- [ ] 当前命令是否带 `timeout 30s`?
+- [ ] 是否 `blocking=false` + `CheckCommandStatus` 轮询?
+- [ ] 输出是否落到 `apps/.tmp/`?
+- [ ] 失败是否只记录不停下整体?
+- [ ] 是否避免交互式 (yes/no、文件覆盖确认)?
+
+---
+
 ## 17. 配套阅读 (按重要性)
 
 ### 17.1 必读 (5 分钟内看完)
@@ -537,6 +610,7 @@ flowchart LR
 - [agent-orchestration.md](./design/agent-orchestration.md) — 1+9 Agent 状态机
 - [skills-design.md](./design/skills-design.md) — Skill Spec / Runner / Validator
 - [data-model.md](./design/data-model.md) — 知识图谱 ER / AGE / pgvector
+- [data-pipeline-lineage.md](./design/data-pipeline-lineage.md) — **6 阶段真实管道设计 (GCS→AF+FK→GCS→MEX→GCS→FK2→CH→Superset) + 双轨学习 (Skills 读 GitHub 代码 + MCP 读运行时元数据)**
 - [llm-router.md](./design/llm-router.md) — LLM 路由 / 缓存 / 成本
 - [frontend-design.md](./design/frontend-design.md) — ag-grid + IDM UI Kit
 - [mcp-server-guide.md](./design/mcp-server-guide.md) — 自建 MCP 教程
@@ -565,7 +639,7 @@ flowchart LR
 
 ---
 
-## 19. 已落地状态 (Build State — 截至 M1 S1.14, 2026-06-07)
+## 19. 已落地状态 (Build State — 截至 M1.5 真实管道, 2026-06-08)
 
 > **这一节是"实测"而非"设计"**: 列出现已跑通的功能 / 端点 / 文件,
 > 后续 Agent 拿到任务时, **先看这节判断是否需要从零造轮子**。
@@ -589,6 +663,8 @@ flowchart LR
 | **M1 S1.12** Lineage 可视化 (react-flow BFS 布局) | ✅ | `verify_s1_12.py` 全绿 |
 | **M1 S1.13** 多源 Owner 融合 (dbt + git + LLM) | ✅ | 测试已纳入 |
 | **M1 S1.14** Eval Harness (Gold Snapshot + LLM-judge + 用户反馈) | ✅ | `tests/test_eval_*.py` 34 个测试全绿 |
+| **M1.5 — 真实数据管道 (GCS→AF→Flink→MEX→CH→Superset)** | ✅ | 4 个新 MCP (gcs / flink / superset_db / airflow_db) + 3 个新 Skill (discover_gcs_assets / parse_flink_job / analyze_data_pipeline) + 3 张表 (gcs_objects / pipelines / pipeline_runs) + Data Quality 提前 + 26 个 BDD 测试全绿 |
+| **K8s 部署 (ACS, 按量计费)** | ✅ | Kustomize base + ACS overlay + ALB Ingress + EIP + KMS Secret + 一键脚本 (`deploy/aliyun/deploy.sh`) |
 
 ### 19.2 已落地的代码模块 (按"用频率"排序)
 
@@ -647,7 +723,7 @@ flowchart LR
 | **asset fqn** | 模式 `^[a-z0-9_.:-]+$` (允许服务名带 `-`, 如 `clickhouse-prod`) |
 | **ai_suggestion 流** | pending → (人工 approve/reject) → 落 table_asset.description |
 
-### 19.5 已完成 (截至 M1 S1.14)
+### 19.5 已完成 (截至 M1.5 真实管道 + K8s 部署, 2026-06-08)
 
 | 任务 | 状态 | 备注 |
 | --- | --- | --- |
@@ -661,8 +737,27 @@ flowchart LR
 | NL2SQL Skill (5 层 Guard) | ✅ | M1 S1.10 完成 |
 | Insight / Anomaly 引擎 | ✅ | M1 S1.11 完成 |
 | Eval Harness (Gold Snapshot) | ✅ | M1 S1.14 完成, 含 LLM-judge + 用户反馈 + few-shot 导出 |
-| 单元 / 集成测试 (pytest) | ✅ | 51 个测试全绿 |
+| 单元 / 集成测试 (pytest) | ✅ | 55 个测试全绿 (含 test_skills_integration, test_feedback_router) |
 | CI (GitHub Actions) | ✅ | `.github/workflows/{ci,skill-eval}.yml` |
+| BDD E2E 测试 (pytest-bdd) | ✅ | 26 个场景, 5 个 feature 文件, 含 data_pipeline (GCS/Flink) |
+| **Data Quality 提前** | ✅ | QualityPage + health_score 写入 detect_anomalies + rules CRUD |
+| **侧边栏主题统一** | ✅ | CSS 变量 `--idm-bg-sidebar`, 与主页一致 |
+| **内联全局搜索** | ✅ | GlobalSearchBar 替代弹出式, 支持 / 快捷键 + 键盘导航 |
+| **GCS MCP** | ✅ | list_objects / get_metadata / read_object / infer_schema (parquet/csv) |
+| **Flink MCP** | ✅ | stub + 接口 (待 Flink JobManager URL 接入) |
+| **Superset DB MCP** | ✅ | stub + 接口 (待 Superset Postgres URL 接入) |
+| **Airflow DB MCP** | ✅ | stub + 接口 (待 Airflow Postgres URL 接入) |
+| **discover_gcs_assets Skill** | ✅ | 扫 GCS → 推断 schema → 写 gcs_objects + table_asset (asset_subtype=gcs_object) |
+| **parse_flink_job Skill** | ✅ | 读 Flink SQL from GitHub → sqlglot 解析 → 写 table_lineage (transform_subtype=flink_sql) |
+| **analyze_data_pipeline Skill** | ✅ | 端到端串联多 Skill, 输出 pipeline_graph |
+| **Pipeline / GcsObject / PipelineRun 模型** | ✅ | migration 0003, ORM 已挂载 |
+| **K8s base manifests** | ✅ | kustomize base: namespace, sa (RRSA), deployments, services, hpa, pdb, network-policies, ingress-class |
+| **K8s ACS overlay** | ✅ | kustomize overlays/acs: ALB Ingress + EIP 自动绑定, 镜像 patch, 资源最小化 |
+| **KMS Secret 模板** | ✅ | `deploy/k8s/overlays/acs/secrets-kms.yaml.example` + 明文 base64 备用 |
+| **一键部署脚本** | ✅ | `deploy/aliyun/deploy.sh` (timeout 30s, 非阻塞, 不需用户确认) |
+| **回滚 / port-forward 脚本** | ✅ | `deploy/aliyun/rollback.sh` / `port-forward.sh` |
+| **部署文档** | ✅ | `deploy/aliyun/README.md` (含架构图 / 镜像 / Secret / ALB / 成本估算) |
+| **自动化执行铁律** | ✅ | §16.5 已加入本文档, 所有 Agent 命令必须 timeout 30s + 非阻塞 |
 
 ### 19.6 不要重复造轮子 (Do NOT Re-Implement)
 

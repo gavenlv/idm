@@ -190,10 +190,18 @@ async def compose_insight(ctx: SkillContext, **inputs: Any) -> SkillResult:
     items: list[dict[str, Any]] = []
     suggestion_id: str | None = None
     if apply:
+        import uuid as _uuid
+        if ctx.use_case_id:
+            try:
+                _tid = _uuid.UUID(str(ctx.use_case_id))
+            except (ValueError, TypeError):
+                _tid = _uuid.UUID("00000000-0000-0000-0000-000000000000")
+        else:
+            _tid = _uuid.UUID("00000000-0000-0000-0000-000000000000")
         sug = AISuggestion(
             suggestion_type="insight",
             target_type="global",
-            target_id=ctx.use_case_id or "00000000-0000-0000-0000-000000000000",
+            target_id=_tid,
             payload={
                 "channel": channel,
                 "days": days,

@@ -118,7 +118,8 @@ async def test_nl2sql_skill_runs(app_with_db, fake_llm, fake_mcp):
         await db.commit()
 
     with patch("idm_api.skills.runner.get_clickhouse_mcp", return_value=fake_mcp), \
-         patch("idm_api.skills.runner.get_llm_router", return_value=fake_llm):
+         patch("idm_api.skills.runner.get_llm_router", return_value=fake_llm), \
+         patch("idm_api.skills.builtin.nl2sql.get_clickhouse_mcp", return_value=fake_mcp):
         transport = ASGITransport(app=app_with_db)
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             r = await c.post("/api/v1/skills/run", json={
@@ -226,7 +227,8 @@ async def test_detect_anomalies_skill(app_with_db, fake_llm, fake_mcp):
         await db.commit()
 
     with patch("idm_api.skills.runner.get_clickhouse_mcp", return_value=fake_mcp), \
-         patch("idm_api.skills.runner.get_llm_router", return_value=fake_llm):
+         patch("idm_api.skills.runner.get_llm_router", return_value=fake_llm), \
+         patch("idm_api.skills.builtin.detect_anomalies.get_clickhouse_mcp", return_value=fake_mcp):
         transport = ASGITransport(app=app_with_db)
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             r = await c.post("/api/v1/skills/run", json={

@@ -1,0 +1,28 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: idm-api
+  labels:
+    app.kubernetes.io/name: idm
+    app.kubernetes.io/component: api
+spec:
+  # 最少可用 1 个 (ACS 单副本场景)
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: idm
+      app.kubernetes.io/component: api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: idm-web
+  labels:
+    app.kubernetes.io/name: idm
+    app.kubernetes.io/component: web
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: idm
+      app.kubernetes.io/component: web

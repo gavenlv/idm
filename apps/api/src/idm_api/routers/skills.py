@@ -70,9 +70,58 @@ async def post_run_skill(
 
 @router.get("/mcp/health", summary="MCP sidecar health")
 async def mcp_health() -> dict[str, Any]:
+    """所有已注册的 MCP 健康状态 + 注册表.
+
+    M1.5 真实管道: gcs / flink / superset_db / airflow_db 已注册, 但默认走 mock / stub,
+    health = ok (即"接口可用"), 真正业务可用性需要 service-conn 信息。
+    """
     checks: dict[str, Any] = {}
+    # 已有: clickhouse
     try:
+        from idm_api.skills.mcp import get_clickhouse_mcp
+
         checks["clickhouse"] = get_clickhouse_mcp().health()
     except Exception as e:  # noqa: BLE001
         checks["clickhouse"] = {"status": "error", "error": str(e)[:200]}
-    return {"checks": checks, "all_ok": all(c.get("status") == "ok" for c in checks.values())}
+
+    # 同步 MCP: gcs (M1.5 真实管道)
+    try:
+        from idm_api.skills.mcp import get_gcs_mcp
+
+        checks["gcs"] = get_gcs_mcp().health()
+    except Exception as e:  # noqa: BLE001
+        checks["gcs"] = {"status": "error", "error": str(e)[:200]}
+
+    # 异步 MCP: github / superset / flink / superset_db / airflow_db
+    async def _check_async(name: str, fn) -> None:  # noqa: ANN001
+        try:
+            checks[name] = await fn()
+        except Exception as e:  # noqa: BLE001
+            checks[name] = {"status": "error", "error": str(e)[:200]}
+
+    from idm_api.skills.mcp import (
+        get_github_mcp,
+        get_superset_mcp,
+        get_flink_mcp,
+        get_superset_db_mcp,
+        get_airflow_db_mcp,
+    )
+
+    gh = get_github_mcp()
+    checks["github"] = await gh.health() if gh.has_token else {"status": "no_token"}
+
+    try:
+        ss = get_superset_mcp()
+        checks["superset"] = await ss.health()
+    except Exception as e:  # noqa: BLE001
+        checks["superset"] = {"status": "error", "error": str(e)[:200]}
+
+    await _check_async("flink", get_flink_mcp().health)
+    await _check_async("superset_db", get_superset_db_mcp().health)
+    await _check_async("airflow_db", get_airflow_db_mcp().health)
+
+    return {
+        "servers": list(checks.keys()),
+        "checks": checks,
+        "all_ok": all(c.get("status") in ("ok", "mock", "not_configured", "no_token") for c in checks.values()),
+    }

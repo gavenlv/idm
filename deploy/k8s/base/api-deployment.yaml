@@ -1,0 +1,156 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: idm-api
+  labels:
+    app.kubernetes.io/name: idm
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "0.1.0"
+spec:
+  # 阿里云 ACS 推荐: 1 副本起步 (按量计费, 最少使用)
+  # HPA 触发后会自动扩 (overlay/acs/kustomization.yaml 里调)
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: idm
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: idm
+        app.kubernetes.io/component: api
+      annotations:
+        # 阿里云 ACS Prometheus 抓取 (ARMS)
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: idm-api
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      # 镜像拉取 (默认 IfNotPresent, overlay 改为 Always + tag)
+      imagePullSecrets: []
+      containers:
+        - name: api
+          # 镜像在 overlay 里覆盖
+          image: idm-api:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: APP_ENV
+              value: "prod"
+            - name: APP_NAME
+              value: "idm"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: LOG_JSON
+              value: "true"
+            - name: API_HOST
+              value: "0.0.0.0"
+            - name: API_PORT
+              value: "8080"
+            - name: API_CORS_ORIGINS
+              value: "*"
+            # === Secret 注入 (overlays/acs/secrets.yaml 中创建 idm-api-env Secret) ===
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: idm-api-env
+                  key: DATABASE_URL
+                  optional: false
+            - name: DATABASE_URL_SYNC
+              valueFrom:
+                secretKeyRef:
+                  name: idm-api-env
+                  key: DATABASE_URL_SYNC
+                  optional: true
+            - name: CLICKHOUSE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: idm-api-env
+                  key: CLICKHOUSE_HOST
+                  optional: true
+            - name: CLICKHOUSE_PORT
+              valueFrom: { secretKeyRef: { name: idm-api-env, key: CLICKHOUSE_PORT, optional: true } }
+            - name: CLICKHOUSE_USER
+              valueFrom: { secretKeyRef: { name: idm-api-env, key: CLICKHOUSE_USER, optional: true } }
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom: { secretKeyRef: { name: idm-api-env, key: CLICKHOUSE_PASSWORD, optional: true } }
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: idm-api-env, key: OPENAI_API_KEY, optional: true } }
+            - name: DEEPSEEK_API_KEY
+              valueFrom: { secretKeyRef: { name: idm-api-env, key: DEEPSEEK_API_KEY, optional: true } }
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom: { secretKeyRef: { name: idm-api-env, key: LANGFUSE_PUBLIC_KEY, optional: true } }
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: idm-api-env, key: LANGFUSE_SECRET_KEY, optional: true } }
+            - name: MCP_GITHUB_TOKEN
+              valueFrom: { secretKeyRef: { name: idm-api-env, key: MCP_GITHUB_TOKEN, optional: true } }
+            - name: MCP_SLACK_BOT_TOKEN
+              valueFrom: { secretKeyRef: { name: idm-api-env, key: MCP_SLACK_BOT_TOKEN, optional: true } }
+          envFrom:
+            # 非敏感的运行时参数从 ConfigMap
+            - configMapRef:
+                name: idm-api-config
+                optional: true
+          resources:
+            # 最小使用: requests 0.25c/256Mi, limits 1c/1Gi
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            failureThreshold: 30
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /app/.cache
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 100Mi }
+        - name: cache
+          emptyDir: { sizeLimit: 200Mi }
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always

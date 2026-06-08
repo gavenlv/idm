@@ -1,0 +1,64 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# === 阿里云 ACS Overlay ===
+# 适用: 阿里云容器计算服务 ACS (Serverless K8s, 按量计费)
+# 部署: kubectl apply -k deploy/k8s/overlays/acs
+# 前置:
+#   1) Secret 已创建 (cp secrets.yaml.example secrets.yaml && 编辑)
+#   2) ALB Ingress 控制器已安装
+#   3) 镜像已 push 到阿里云 ACR
+
+namespace: idm
+
+# 镜像配置: 替换为你 ACR 仓库
+images:
+  - name: idm-api
+    newName: registry.cn-hangzhou.aliyuncs.com/your-ns/idm-api
+    newTag: "0.1.0"
+  - name: idm-web
+    newName: registry.cn-hangzhou.aliyuncs.com/your-ns/idm-web
+    newTag: "0.1.0"
+
+# 资源 patch: ACS 推荐最小规格
+patches:
+  - target:
+      kind: Deployment
+      name: idm-api
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: Deployment
+      name: idm-web
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: idm-api
+    patch: |
+      - op: replace
+        path: /spec/maxReplicas
+        value: 4
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+
+resources:
+  - ../../base
+  - ingress-alb.yaml
+  - secrets-kms.yaml.example  # ⚠️  改名为 secrets-kms.yaml 后去掉 .example
+
+# Secret 引用 (实际 Secret 由用户单独 apply, 不进 git)
+generatorOptions:
+  disableNameSuffixHash: true
+
+# 公共标签
+labels:
+  - includeSelectors: true
+    pairs:
+      deployment.aliyun.com/acs: "true"
+      env: prod

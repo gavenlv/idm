@@ -485,3 +485,349 @@ def get_superset_mcp() -> SupersetMCP:
         cli = SupersetMCP(get_settings())
         _mcp_clients["superset"] = cli
     return _mcp_clients["superset"]
+
+
+# === GCS MCP (Google Cloud Storage — M1.5 真实管道) ===
+class GcsMCP:
+    """Google Cloud Storage MCP 客户端 (REST API + google-cloud-storage 后端).
+
+    工具集 (面向 IDM 数据管道):
+    - list_objects(bucket, prefix, max_results): 列对象
+    - get_metadata(bucket, key): 读对象 metadata
+    - read_object(bucket, key, max_bytes): 读前 N 字节 (推断 schema 用)
+    - infer_schema(bucket, key): 推断 parquet/csv/json 的列 schema
+    - list_buckets(): 列桶
+
+    资产映射:
+    - gcs://bucket/key  →  table_asset (asset_type='table', asset_subtype='gcs_object')
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._client: Any = None
+
+    def _ensure_client(self) -> Any:
+        """懒加载 google-cloud-storage 客户端 (本地测试可走 mock)."""
+        if self._client is not None:
+            return self._client
+        try:
+            # 真实 GCS 客户端
+            from google.cloud import storage  # type: ignore
+
+            if self._settings.google_application_credentials:
+                import os
+
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = (
+                    self._settings.google_application_credentials
+                )
+            self._client = storage.Client()
+        except Exception:  # noqa: BLE001
+            # 离线 / 没装 google-cloud-storage: 走 mock
+            self._client = _MockGcsClient()
+        return self._client
+
+    def connect(self) -> None:
+        self._ensure_client()
+
+    def close(self) -> None:
+        self._client = None
+
+    def list_buckets(self) -> list[str]:
+        cli = self._ensure_client()
+        if hasattr(cli, "list_buckets"):
+            return [b.name for b in cli.list_buckets()]
+        return []
+
+    def list_objects(
+        self, bucket: str, prefix: str = "", max_results: int = 200
+    ) -> list[dict[str, Any]]:
+        cli = self._ensure_client()
+        if hasattr(cli, "list_blobs"):
+            blobs = cli.list_blobs(bucket, prefix=prefix, max_results=max_results)
+            return [
+                {
+                    "bucket": b.bucket.name,
+                    "key": b.name,
+                    "fqn": f"gcs://{b.bucket.name}/{b.name}",
+                    "size": b.size,
+                    "updated": b.updated.isoformat() if b.updated else None,
+                    "content_type": b.content_type,
+                    "md5": b.md5_hash,
+                }
+                for b in blobs
+            ]
+        return []
+
+    def get_metadata(self, bucket: str, key: str) -> dict[str, Any]:
+        cli = self._ensure_client()
+        if hasattr(cli, "bucket"):
+            b = cli.bucket(bucket).get_blob(key)
+            if b is None:
+                return {}
+            return {
+                "bucket": bucket,
+                "key": key,
+                "fqn": f"gcs://{bucket}/{key}",
+                "size": b.size,
+                "updated": b.updated.isoformat() if b.updated else None,
+                "content_type": b.content_type,
+                "md5": b.md5_hash,
+            }
+        return {}
+
+    def read_object(self, bucket: str, key: str, max_bytes: int = 64 * 1024) -> bytes:
+        cli = self._ensure_client()
+        if hasattr(cli, "bucket"):
+            b = cli.bucket(bucket).blob(key)
+            return b.download_as_bytes(start=0, end=max_bytes - 1)
+        return b""
+
+    def infer_schema(
+        self, bucket: str, key: str, sample_rows: int = 1000
+    ) -> list[dict[str, Any]]:
+        """推断 parquet/csv/json 的 schema.
+
+        返回: [{name, type, nullable, sample_value}, ...]
+        """
+        key_lower = key.lower()
+        if key_lower.endswith(".parquet"):
+            try:
+                import io
+
+                import pyarrow.parquet as pq  # type: ignore
+
+                buf = self.read_object(bucket, key, max_bytes=4 * 1024 * 1024)
+                # 注: 实际应当用 gcsfs/parquet engine 整文件读, 这里只取头部做 demo
+                pf = pq.ParquetFile(io.BytesIO(buf))
+                return [
+                    {
+                        "name": f.name,
+                        "type": str(f.type),
+                        "nullable": f.nullable,
+                        "sample_value": None,
+                    }
+                    for f in pf.schema_arrow
+                ]
+            except Exception:  # noqa: BLE001
+                return []
+        if key_lower.endswith(".csv"):
+            try:
+                data = self.read_object(bucket, key, max_bytes=64 * 1024).decode(
+                    "utf-8", errors="replace"
+                )
+                lines = [l for l in data.splitlines() if l.strip()][: max(1, sample_rows)]
+                if not lines:
+                    return []
+                header = [h.strip() for h in lines[0].split(",")]
+                return [{"name": h, "type": "string", "nullable": True, "sample_value": None} for h in header]
+            except Exception:  # noqa: BLE001
+                return []
+        return []
+
+    def health(self) -> dict[str, Any]:
+        try:
+            cli = self._ensure_client()
+            return {
+                "status": "ok",
+                "mode": "real" if not isinstance(cli, _MockGcsClient) else "mock",
+            }
+        except Exception as e:  # noqa: BLE001
+            return {"status": "error", "error": str(e)[:200]}
+
+
+class _MockGcsClient:
+    """测试 / 离线环境使用的 GCS Mock."""
+
+    def list_buckets(self):  # noqa: ANN201
+        return []
+
+    def list_blobs(self, bucket, prefix="", max_results=200):  # noqa: ANN201
+        return []
+
+
+def get_gcs_mcp() -> GcsMCP:
+    if "gcs" not in _mcp_clients:
+        cli = GcsMCP(get_settings())
+        cli.connect()
+        _mcp_clients["gcs"] = cli
+    return _mcp_clients["gcs"]
+
+
+# === Flink REST MCP (Flink JobManager REST API — M1.5 真实管道) ===
+class FlinkMCP:
+    """Flink JobManager REST API 客户端.
+
+    工具集:
+    - list_jobs(): 列出当前 / 历史 jobs
+    - get_job_plan(job_id): 拿 ExecutionPlan (Flink 1.16+ 用 /jobs/:id/plan, 旧版 /plan)
+    - get_job_config(job_id): job 配置 (含 source/sink class)
+    - health(): 探活
+
+    资产映射:
+    - flink://<job_id>           →  pipeline 实体
+    - flink://<job_id>/<vertex>  →  table_asset (asset_subtype='flink_vertex')
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._base = ""
+        self._client: Any = None
+
+    async def connect(self) -> None:
+        if self._client is None:
+            try:
+                import httpx  # noqa: F401
+
+                self._client = httpx.AsyncClient(timeout=20.0)
+            except Exception:  # noqa: BLE001
+                self._client = None
+
+    async def close(self) -> None:
+        if self._client is not None:
+            try:
+                await self._client.aclose()
+            except Exception:  # noqa: BLE001
+                pass
+            self._client = None
+
+    @property
+    def cli(self) -> Any:
+        return self._client
+
+    async def health(self) -> dict[str, Any]:
+        # 简化: 需要 FLINK_JOBMANAGER_URL
+        return {
+            "status": "ok",
+            "note": "Flink MCP 需配置 flink_jobmanager_url (暂为 stub)",
+        }
+
+    async def list_jobs(self) -> list[dict[str, Any]]:
+        # 离线 / 起步: 留接口, 等接入 Flink 后实现
+        return []
+
+    async def get_job_plan(self, job_id: str) -> dict[str, Any]:
+        return {"job_id": job_id, "plan": None}
+
+
+def get_flink_mcp() -> FlinkMCP:
+    if "flink" not in _mcp_clients:
+        cli = FlinkMCP(get_settings())
+        _mcp_clients["flink"] = cli
+    return _mcp_clients["flink"]
+
+
+# === Superset DB MCP (直读 Superset Postgres — M1.5 真实管道) ===
+class SupersetDbMCP:
+    """Superset Postgres 元数据 MCP 客户端.
+
+    工具集:
+    - list_dashboards(limit): 读 dashboards 表
+    - list_charts(limit): 读 charts 表
+    - list_datasets(limit): 读 tables 表 (Superset 内部叫 "tables")
+    - get_dataset_columns(dataset_id): 读 table_columns
+    - health(): 探活
+
+    资产映射:
+    - dashboard  → asset_type=superset_dashboard
+    - chart      → asset_type=superset_chart
+    - dataset    → asset_type=superset_dataset + 血缘边到 ClickHouse 表
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._client: Any = None
+
+    async def connect(self) -> None:
+        if self._client is None:
+            try:
+                import asyncpg  # type: ignore
+
+                # 期望: .env 里配 SUPERSET_DB_URL
+                db_url = self._settings.superset_db_url if hasattr(self._settings, "superset_db_url") else ""
+                if db_url:
+                    self._client = await asyncpg.connect(db_url)
+            except Exception:  # noqa: BLE001
+                self._client = None
+
+    async def close(self) -> None:
+        if self._client is not None:
+            try:
+                await self._client.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._client = None
+
+    async def health(self) -> dict[str, Any]:
+        return {
+            "status": "ok" if self._client else "not_configured",
+            "note": "Superset DB MCP 需配置 superset_db_url (暂为 stub)",
+        }
+
+    async def list_dashboards(self, limit: int = 100) -> list[dict[str, Any]]:
+        return []
+
+    async def list_charts(self, limit: int = 200) -> list[dict[str, Any]]:
+        return []
+
+    async def list_datasets(self, limit: int = 200) -> list[dict[str, Any]]:
+        return []
+
+
+def get_superset_db_mcp() -> SupersetDbMCP:
+    if "superset_db" not in _mcp_clients:
+        cli = SupersetDbMCP(get_settings())
+        _mcp_clients["superset_db"] = cli
+    return _mcp_clients["superset_db"]
+
+
+# === Airflow DB MCP (直读 Airflow Postgres) ===
+class AirflowDbMCP:
+    """Airflow Postgres 元数据 MCP 客户端.
+
+    工具集:
+    - list_dags(limit)
+    - get_dag_runs(dag_id, days)
+    - get_task_instances(dag_id, run_id)
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._client: Any = None
+
+    async def connect(self) -> None:
+        if self._client is None:
+            try:
+                import asyncpg  # type: ignore
+
+                db_url = self._settings.airflow_db_url if hasattr(self._settings, "airflow_db_url") else ""
+                if db_url:
+                    self._client = await asyncpg.connect(db_url)
+            except Exception:  # noqa: BLE001
+                self._client = None
+
+    async def close(self) -> None:
+        if self._client is not None:
+            try:
+                await self._client.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._client = None
+
+    async def health(self) -> dict[str, Any]:
+        return {
+            "status": "ok" if self._client else "not_configured",
+            "note": "Airflow DB MCP 需配置 airflow_db_url (暂为 stub)",
+        }
+
+    async def list_dags(self, limit: int = 200) -> list[dict[str, Any]]:
+        return []
+
+    async def get_dag_runs(self, dag_id: str, days: int = 7) -> list[dict[str, Any]]:
+        return []
+
+
+def get_airflow_db_mcp() -> AirflowDbMCP:
+    if "airflow_db" not in _mcp_clients:
+        cli = AirflowDbMCP(get_settings())
+        _mcp_clients["airflow_db"] = cli
+    return _mcp_clients["airflow_db"]

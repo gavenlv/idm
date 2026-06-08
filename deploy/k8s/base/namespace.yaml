@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: idm
+  labels:
+    name: idm
+    # 阿里云 ACS 推荐: pod 粒度计费; 不需要 cost-optimization 标签

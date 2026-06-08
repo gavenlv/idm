@@ -12,7 +12,8 @@ Feature: Data Quality — Dashboard, rules, profiling, and insights
     When I get the quality dashboard
     Then the response status is 200
     And the response body is valid JSON
-    And the quality dashboard has "tables_total" and "rules_total" fields
+    And the quality dashboard has the tables_total field
+    And the quality dashboard has the rules_total field
 
   Scenario: Create a freshness rule and list it
     When I create a freshness rule for "shop.default.orders_daily"

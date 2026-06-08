@@ -81,10 +81,14 @@ async def profiler(ctx: SkillContext, **inputs: Any) -> SkillResult:
         started = time.perf_counter()
         try:
             parts = (t.fqn or "").split(".")
-            if len(parts) != 4:
+            # FQN may be 3-part (db.schema.tbl) or 4-part (svc.db.schema.tbl)
+            if len(parts) == 3:
+                db_name, _, tbl_name = parts
+            elif len(parts) == 4:
+                _, db_name, _, tbl_name = parts
+            else:
                 skipped += 1
                 continue
-            _, db_name, _, tbl_name = parts
             # 1) row_count
             try:
                 stats = mcp.get_table_stats(db_name, tbl_name)

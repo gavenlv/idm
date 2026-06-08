@@ -1,0 +1,65 @@
+# === 内部网络策略: 只允许同 namespace 内部访问 API ===
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: idm-api
+  labels:
+    app.kubernetes.io/name: idm
+    app.kubernetes.io/component: api
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: idm
+      app.kubernetes.io/component: api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # 同 namespace 内任意 pod
+    - from:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              name: idm
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    # 允许访问外部 LLM API, ClickHouse, Postgres
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+    # 允许访问内网 (PG / CH)
+    - to:
+        - ipBlock:
+            cidr: 10.0.0.0/8
+        - ipBlock:
+            cidr: 172.16.0.0/12
+        - ipBlock:
+            cidr: 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 5432  # Postgres
+        - protocol: TCP
+          port: 8123  # ClickHouse HTTP
+        - protocol: TCP
+          port: 9000  # ClickHouse native
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+    # DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53

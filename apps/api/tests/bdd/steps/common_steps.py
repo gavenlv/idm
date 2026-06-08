@@ -11,7 +11,7 @@ import uuid as _uuid
 from typing import Any
 
 import pytest
-from pytest_bdd import given, then, when
+from pytest_bdd import given, parsers, then, when
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +144,6 @@ def seed_owner(bdd_client, app_with_db):
             db.add(AssetOwner(
                 id=_uuid.uuid4(),
                 table_id=_uuid.UUID(tid),
-                table_fqn="shop.default.orders_daily",
                 user_email="alice@example.com",
                 user_name="Alice",
                 team="data-eng",
@@ -167,7 +166,7 @@ def seed_glossary(bdd_client, app_with_db):
         async with _session_factory() as db:
             db.add(GlossaryTerm(
                 id=_uuid.uuid4(),
-                term="GMV",
+                name="GMV",
                 definition="Gross Merchandise Volume",
                 domain="sales",
                 owner_team="bi",
@@ -372,7 +371,7 @@ def run_detect_anomalies(bdd_client):
 def run_map_glossary(bdd_client):
     _ctx(bdd_client)["response"] = bdd_client.post("/api/v1/skills/run", json={
         "name": "map_glossary",
-        "inputs": {"service": "shop", "apply": False, "use_llm": False},
+        "inputs": {"service": "shop", "apply": False, "use_llm": True},
     })
 
 
@@ -548,7 +547,7 @@ def body_json(bdd_client):
     assert _ctx(bdd_client)["body"] is not None
 
 
-@then("the response contains at least {n:d} asset")
+@then(parsers.parse("the response contains at least {n:d} asset"))
 def contains_assets(bdd_client, n):
     body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
     items = body.get("items", body) if isinstance(body, dict) else body
@@ -575,7 +574,8 @@ def contains_alice(bdd_client):
 def contains_gmv(bdd_client):
     body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
     items = body.get("items", [])
-    terms = [t.get("term") for t in items]
+    # 兼容 name / term 两种 schema 形态
+    terms = [t.get("name") or t.get("term") for t in items]
     assert "GMV" in terms, f"GMV not in: {terms}"
 
 
@@ -591,10 +591,15 @@ def detect_has_kind(bdd_client):
 @then("the MCP health reports clickhouse status")
 def mcp_has_ch(bdd_client):
     body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
-    assert "clickhouse" in body, f"no clickhouse in mcp health: {body}"
+    # Body shape: {"checks": {"clickhouse": {...}}, "all_ok": true}
+    checks = body.get("checks") if isinstance(body, dict) else None
+    if checks is not None:
+        assert "clickhouse" in checks, f"no clickhouse in mcp health: {body}"
+    else:
+        assert "clickhouse" in body, f"no clickhouse in mcp health: {body}"
 
 
-@then("the search returns at least {n:d} hit")
+@then(parsers.parse("the search returns at least {n:d} hit"))
 def search_hits(bdd_client, n):
     body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
     items = body.get("items", [])
@@ -676,7 +681,7 @@ def lineage_has_downstream(bdd_client):
     assert "shop.default.orders_summary" in fqns, f"downstream fqns: {fqns}"
 
 
-@then("the impact response includes downstream count >= {n:d}")
+@then(parsers.parse("the impact response includes downstream count >= {n:d}"))
 def impact_downstream_count(bdd_client, n):
     body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
     c = body.get("downstream_count", 0)
@@ -703,14 +708,13 @@ def sql_lineage_has_upstream(bdd_client):
 # M4 — Quality / ChatBI (Then)
 # ---------------------------------------------------------------------------
 
-@then("the quality dashboard has \"{a}\" and \"{b}\" fields")
-def dashboard_fields(bdd_client, a, b):
+@then(parsers.parse("the quality dashboard has the {a} field"))
+def dashboard_field(bdd_client, a):
     body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
     assert a in body, f"missing {a}: {list(body.keys())}"
-    assert b in body, f"missing {b}: {list(body.keys())}"
 
 
-@then("the rules list contains at least {n:d} rule")
+@then(parsers.parse("the rules list contains at least {n:d} rule"))
 def rules_count(bdd_client, n):
     body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
     items = body.get("items", [])
@@ -723,7 +727,18 @@ def status_201(bdd_client):
     assert r.status_code == 201, f"expected 201, got {r.status_code}: {r.text}"
 
 
-@then("the profiler output reports at least {n:d} profiled table")
+@then(parsers.parse("the response status is {code:d}"))
+def status_any(bdd_client, code):
+    r = _ctx(bdd_client)["response"]
+    assert r.status_code == code, f"expected {code}, got {r.status_code}: {r.text}"
+
+
+@when("I get the skills list")
+def get_skills_list(bdd_client):
+    _ctx(bdd_client)["response"] = bdd_client.get("/api/v1/skills")
+
+
+@then(parsers.parse("the profiler output reports at least {n:d} profiled table"))
 def profiler_count(bdd_client, n):
     body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
     items = (body.get("output") or {}).get("items") or []
@@ -731,7 +746,7 @@ def profiler_count(bdd_client, n):
     assert len(ok) >= n, f"only {len(ok)} profiled ok, expected >= {n}: {items}"
 
 
-@then("the compose_insight output reports at least {n:d} finding")
+@then(parsers.parse("the compose_insight output reports at least {n:d} finding"))
 def compose_count(bdd_client, n):
     body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
     items = (body.get("output") or {}).get("items") or []
@@ -765,9 +780,167 @@ def idm_self_has_tool(bdd_client, name):
     assert name in names, f"{name} not in tool list: {names}"
 
 
-@then('the skills list contains "{name}"')
+@then(parsers.parse('the skills list contains "{name}"'))
 def skills_list_contains(bdd_client, name):
     body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
     items = body.get("result") or body.get("items") or []
     names = {s.get("name") if isinstance(s, dict) else getattr(s, "name", None) for s in items}
     assert name in names, f"{name} not in skills: {names}"
+
+
+# ---------------------------------------------------------------------------
+# idm-self MCP — additional Then steps
+# ---------------------------------------------------------------------------
+
+@then(parsers.parse('the idm-self tool list contains "{name}"'))
+def idm_self_tool_contains(bdd_client, name):
+    body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
+    tools = body.get("tools", []) or []
+    names = {t.get("name") for t in tools}
+    assert name in names, f"{name} not in idm-self tool list: {names}"
+
+
+@then(parsers.parse('the search result contains the table "{fqn}"'))
+def search_result_contains_table(bdd_client, fqn):
+    body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
+    # Try several response shapes
+    result = body.get("result")
+    if isinstance(result, dict):
+        items = body.get("items") or result.get("items") or []
+    else:
+        items = body.get("items") or result or body.get("hits") or body.get("results") or []
+    fqns = {
+        i.get("fqn")
+        for i in items
+        if isinstance(i, dict) and i.get("fqn")
+    }
+    if fqn not in fqns:
+        # Try unpacking nested
+        fqns |= {
+            r.get("fqn")
+            for i in items
+            for r in (i.get("results") or [])
+            if isinstance(r, dict)
+        }
+    assert fqn in fqns, f"{fqn} not in idm.search_assets result: {fqns}"
+
+
+# ---------------------------------------------------------------------------
+# Lineage impact — additional Given for orders_summary
+# ---------------------------------------------------------------------------
+
+@given('an owner "alice@example.com" verified for "shop.default.orders_summary"')
+def seed_owner_summary(bdd_client, app_with_db):
+    from idm_api.db import _session_factory
+    from idm_kg.models.owner import AssetOwner
+
+    tid = _ctx(bdd_client).get("summary_table_id")
+    if not tid:
+        return  # no summary table seeded; skip
+
+    async def _seed():
+        async with _session_factory() as db:
+            db.add(AssetOwner(
+                id=_uuid.uuid4(),
+                table_id=_uuid.UUID(tid),
+                user_email="alice@example.com",
+                user_name="Alice",
+                team="data-eng",
+                role="owner",
+                source="git_blame",
+                confidence=0.85,
+                is_verified=True,
+            ))
+            await db.commit()
+
+    _run(_seed())
+
+
+# ---------------------------------------------------------------------------
+# M1.5 — Data Pipeline (GCS / Flink / Superset / Airflow) — BDD steps
+# ---------------------------------------------------------------------------
+
+@when("I list the available MCP servers")
+def list_mcp_servers(bdd_client):
+    _ctx(bdd_client)["response"] = bdd_client.get("/api/v1/skills/mcp/health")
+
+
+@then(parsers.parse('the MCP list contains "{name}"'))
+def mcp_list_contains(bdd_client, name):
+    body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
+    servers = body.get("servers") or []
+    assert name in servers, f"{name} not in MCP servers: {servers}"
+
+
+@when(parsers.parse('I run the skill "{name}" with inputs:'))
+def run_skill_with_inputs(bdd_client, name, datatable):
+    """datatable format:
+        | bucket | my-bucket |
+        | prefix | orders/   |
+    """
+    inputs: dict[str, Any] = {}
+    # pytest-bdd datatable 解析: datatable 是 list[list[str]]
+    if not datatable:
+        return
+    for row in datatable:
+        # row 可能是 list[str] 或 dataclass, 兼容两种
+        if hasattr(row, "cells"):
+            cells = row.cells
+        else:
+            cells = row
+        if not cells or len(cells) < 2:
+            continue
+        k, v = str(cells[0]).strip(), str(cells[1]).strip()
+        # 类型转换
+        if v.lower() in ("true", "false"):
+            inputs[k] = v.lower() == "true"
+        elif v.isdigit():
+            inputs[k] = int(v)
+        elif v.startswith("[") or v.startswith("{"):
+            import json as _json
+            try:
+                inputs[k] = _json.loads(v)
+            except Exception:  # noqa: BLE001
+                inputs[k] = v
+        else:
+            inputs[k] = v
+    _ctx(bdd_client)["response"] = bdd_client.post("/api/v1/skills/run", json={
+        "name": name,
+        "inputs": inputs,
+    })
+
+
+@then("the skill output has an empty items list or a no objects summary")
+def skill_empty_or_no_objects(bdd_client):
+    body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
+    output = body.get("output") or {}
+    items = output.get("items") or []
+    summary = output.get("summary") or {}
+    if items:
+        return
+    reason = summary.get("reason") or summary.get("error") or ""
+    assert "no" in reason.lower() or reason == "", f"unexpected summary: {summary}"
+
+
+@then(parsers.parse('the response body has a detail containing "{text}"'))
+def detail_contains(bdd_client, text):
+    body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
+    detail = str(body.get("detail", ""))
+    assert text in detail, f"{text!r} not in detail: {detail!r}"
+
+
+@then(parsers.parse('the response body has an error containing "{text}"'))
+def error_contains(bdd_client, text):
+    body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
+    err = str(body.get("error", ""))
+    assert text in err, f"{text!r} not in error: {err!r}"
+
+
+@then(parsers.parse("the response body has an ok value of {expected}"))
+def ok_value(bdd_client, expected):
+    body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
+    got = body.get("ok")
+    if expected.lower() == "true":
+        assert got is True, f"expected ok=true, got {got}"
+    elif expected.lower() == "false":
+        assert got is False, f"expected ok=false, got {got}"

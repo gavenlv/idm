@@ -1,0 +1,55 @@
+# IDM 阿里云 ALB Ingress (按量计费, 最小规格)
+# 走 80 端口到 web, 路径 /api/* 转发到 API
+# 阿里云 ALB 注解参考: https://help.aliyun.com/document_detail/198761.html
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: idm
+  labels:
+    app.kubernetes.io/name: idm
+  annotations:
+    # === ALB 配置 ===
+    alb.ingress.kubernetes.io/name: idm-alb
+    alb.ingress.kubernetes.io/address-type: internet
+    # 按量计费实例 (最小使用, 适合低 QPS 场景)
+    alb.ingress.kubernetes.io/instance-type: "slb.s1.small"
+    # 自动创建 EIP 供外网访问
+    alb.ingress.kubernetes.io/binding-eip: "true"
+    # 监听 80 端口 (HTTPS 需要再配证书)
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":false,"HTTP":80}]'
+    # 健康检查
+    alb.ingress.kubernetes.io/health-check-enabled: "true"
+    alb.ingress.kubernetes.io/health-check-path: "/health"
+    alb.ingress.kubernetes.io/health-check-interval-seconds: "15"
+    alb.ingress.kubernetes.io/health-check-timeout-seconds: "3"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+    # 关闭访问日志 (节省成本)
+    alb.ingress.kubernetes.io/access-log-enabled: "false"
+    # 不强制 HTTPS (M1.5 + 起步, 后续可加 cert-manager)
+    alb.ingress.kubernetes.io/force-redirect-https: "false"
+    # 默认后端
+    alb.ingress.kubernetes.io/default-backend: "idm-web:80"
+    # 关联的 EIP (overlay 注入)
+    # alb.ingress.kubernetes.io/eip-id: "eip-xxxxxxxx"
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          # 根路径 → web (SPA 静态)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: idm-web
+                port:
+                  number: 80
+          # /api/*  → API service
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: idm-api
+                port:
+                  number: 8080

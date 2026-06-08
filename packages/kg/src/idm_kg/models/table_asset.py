@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, Integer, SmallInteger, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -60,6 +60,14 @@ class TableAsset(Base, UUIDMixin, TimestampMixin):
     health_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     # 上次计算 health_score 的时间
     health_score_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # === 真实数据管道 (M1.5) ===
+    # 子类型: gcs_object / flink_table / airflow_dataset / mex_io / superset_dataset / dbt_model / clickhouse_table
+    asset_subtype: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # 外部系统定位符: gcs://bucket/key / airflow://dag_id/task_id / flink://db/table / mex://model_name
+    external_ref: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # 6 阶段管道标号: 1|2|3|4|5|6 (强约束; 用于 6 阶段真实管道用例)
+    pipeline_stage: Mapped[int | None] = mapped_column(SmallInteger, nullable=True, index=True)
 
     # 扩展属性 (PII / 业务标签 / 备注)
     extra: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)

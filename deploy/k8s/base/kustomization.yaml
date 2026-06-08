@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# === IDM base manifest (kustomize) ===
+# 适用于阿里云容器计算服务 ACS / 任意 K8s 1.24+
+# 部署:  kubectl apply -k deploy/k8s/overlays/acs
+# 安全:  Secret 全部走 external-secrets 或 sealed-secrets (见 overlays/acs/secrets-secret.yaml.example)
+
+namespace: idm
+namePrefix: ""
+
+resources:
+  - namespace.yaml
+  - api-deployment.yaml
+  - api-service.yaml
+  - web-deployment.yaml
+  - web-service.yaml
+  - api-config.yaml
+  - web-config.yaml
+  - api-hpa.yaml
+  - network-policies.yaml
+  - serviceaccount.yaml
+  - pdb.yaml
+  - ingress-class.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: idm
+  app.kubernetes.io/managed-by: kustomize

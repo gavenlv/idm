@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: idm-api-config
+  labels:
+    app.kubernetes.io/name: idm
+    app.kubernetes.io/component: api
+data:
+  # 通用非敏感配置
+  LLM_DEFAULT_MODEL: "deepseek-v4"
+  LLM_PLANNER_MODEL: "deepseek-v4"
+  LLM_CHEAP_MODEL: "deepseek-v4"
+  LLM_PII_MODEL: "deepseek-v4"
+  LANGFUSE_HOST: ""
+  LANGFUSE_ENABLED: "false"
+  API_WORKERS: "1"
+  DB_POOL_SIZE: "5"
+  DB_MAX_OVERFLOW: "5"
+  DB_POOL_TIMEOUT: "30"
+  MCP_CLICKHOUSE_TRANSPORT: "http"
+  MCP_GITHUB_TRANSPORT: "http"
+  MCP_GCS_TRANSPORT: "http"
+  # 阿里云 ACS 时区
+  TZ: "Asia/Shanghai"

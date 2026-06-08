@@ -158,7 +158,6 @@ async def _apply_suggestion(db: AsyncSession, sug: AISuggestion) -> str:
             db.add(
                 AssetOwner(
                     table_id=sug.target_id,
-                    table_fqn=t.fqn,
                     user_email=email,
                     user_name=payload.get("user_name"),
                     team=payload.get("team"),
