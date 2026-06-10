@@ -392,14 +392,28 @@ def get_github_mcp() -> GitHubMCP:
 
 
 async def init_mcp_async() -> None:
-    """在 FastAPI startup 中调用, 把 async 客户端连上。"""
-    gh = get_github_mcp()
-    await gh.connect()
-    # CH 是同步, 也保证连上
-    get_clickhouse_mcp()
-    # Superset (async), 仅 connect, login 懒加载
-    ss = get_superset_mcp()
-    await ss.connect()
+    """在 FastAPI startup 中调用, 把 async 客户端连上。
+
+    设计: 单个 MCP 不可达不应该阻塞 API 启动。
+    失败只记 log, 业务调用时再报错 (fail-soft)。
+    """
+    # GitHub
+    try:
+        gh = get_github_mcp()
+        await gh.connect()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("init_mcp_async: github connect failed: %s", e)
+    # ClickHouse (sync, 不阻塞)
+    try:
+        get_clickhouse_mcp()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("init_mcp_async: clickhouse connect failed: %s", e)
+    # Superset (async)
+    try:
+        ss = get_superset_mcp()
+        await ss.connect()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("init_mcp_async: superset connect failed: %s", e)
 
 
 @asynccontextmanager

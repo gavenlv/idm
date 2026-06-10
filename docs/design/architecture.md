@@ -18,6 +18,12 @@
 - [3. 总体架构总览](#3-总体架构总览)
 - [4. 三大支柱 + 五原则（MCP / UseCase / Agent-Skill）](#4-三大支柱--五原则mcp--usecase--agent-skill)
 - [5. 五大核心子系统](#5-五大核心子系统)
+  - [5.1 Use Case Registry](#51-use-case-registry-业务配置中心)
+  - [5.2 Agent Orchestrator + Knowledge Engine](#52-agent-orchestrator--knowledge-engine-ai-核心)
+  - [5.3 MCP Layer](#53-mcp-layer-协议层)
+  - [5.4 LLM Gateway](#54-llm-gateway-统一路由)
+  - [5.5 Delivery Layer](#55-delivery-layer-交付层)
+  - [**5.6 触发与 Re-scan 子系统 (M1.5 新增)**](#56-触发与-re-scan-子系统-m15-新增--平台自己的主动脉)
 - [6. 技术栈映射](#6-技术栈映射)
 - [7. 数据流：端到端生命周期](#7-数据流端到端生命周期)
 - [8. 与现有栈的集成](#8-与现有栈的集成)
@@ -490,6 +496,86 @@ def pick_model(task: dict) -> str:
 | **Webhook / API** | GraphQL (主) + REST (Webhook) | 集成到内部系统 |
 
 **前端原则**: **不引 antd / material ui**, 用 **ag-grid Community** + 自研 **IDM UI Kit** (复用公司 Design Token)。详见 [frontend-design.md](./frontend-design.md)
+
+### 5.6 触发与 Re-scan 子系统 (M1.5 新增 — 平台自己的"主动脉")
+
+> 资产/血缘是"活的", 上游 GCS / Flink / ClickHouse / Superset 每天都在变。
+> IDM 提供 2 套 **业务级 + 系统级** 入口, 让"重新扫描"成为平台一等公民, 不是 LLM ad-hoc 行为。
+
+```mermaid
+flowchart LR
+    subgraph 业务级[业务入口: Use Case 视角]
+        UC1[POST /use-cases/{id}/trigger] -->|加载 YAML| O1[analyze_data_pipeline]
+        UC2[POST /use-cases/{id}/rescan] -->|alias| O1
+        UC3[POST /use-cases/{id}/stages/{n}/trigger] -->|过滤| O1
+    end
+    subgraph 系统级[系统入口: 资源视角]
+        S1[POST /scan/asset {source_type, ...}] --> O2[discover_gcs_assets / discover_clickhouse_assets / parse_superset_dashboard]
+    end
+    subgraph 底层[底层 Skill]
+        O1 --> SK1[discover_gcs_assets]
+        O1 --> SK2[parse_flink_job / parse_mex_io]
+        O1 --> SK3[discover_clickhouse_assets]
+        O2 --> SK1
+        O2 --> SK3
+    end
+    SK1 --> UP[upsert: assets / lineage]
+    SK2 --> UP
+    SK3 --> UP
+```
+
+**关键设计**:
+
+| 维度 | 业务级 (`/use-cases/{id}/*`) | 系统级 (`/scan/asset`) |
+| --- | --- | --- |
+| **触发方** | 业务人员 / UI / CronJob | 平台 / 运维 / ChatOps |
+| **参数** | use case YAML (含 sources) | source_type + bucket / database |
+| **范围** | 整个 6 阶段管道 (按 use case) | 单一数据源 (GCS/CH/Superset) |
+| **依赖** | 必须先有 use case | 不需要 use case |
+| **典型场景** | "我改了 YAML 帮我跑一次" / "整条管道 re-scan" | "刚接了一个新 GCS bucket" / "CH 恢复了" |
+| **幂等** | ✅ (asset / lineage upsert) | ✅ |
+| **超时** | 单 skill 30s, 总时长由 client 控制 | 同左 |
+
+**入口选择决策树**:
+
+```
+我要 re-scan ...
+├── 业务上"按 use case 跑" (业务人员/UI)
+│   ├── 全 6 阶段     → POST /use-cases/{id}/trigger
+│   ├── 整条 idempotent → POST /use-cases/{id}/rescan
+│   └── 只某一阶段    → POST /use-cases/{id}/stages/{n}/trigger
+├── 资源级"按 source_type 跑" (平台/运维)
+│   ├── GCS bucket   → POST /scan/asset  {source_type: gcs, bucket: ...}
+│   ├── ClickHouse   → POST /scan/asset  {source_type: clickhouse, database: ...}
+│   ├── Superset     → POST /scan/asset  {source_type: superset_export, service_name: ...}
+│   └── 全部资源     → POST /scan/asset  {source_type: all}
+└── CI / Cron
+    └── ./scripts/rescan_pipeline.sh --full
+        ./scripts/rescan_pipeline.sh --stage 5
+        ./scripts/bootstrap.sh           (全量 bootstrap)
+```
+
+**幂等保证**:
+- 所有 Skill 走 `discover_*` (upsert by `fqn`) / `parse_*` (upsert by `(upstream, downstream, transform_type)`)
+- 多次调用结果一致, 适合周期任务
+- 失败 stage 不影响后续 stage (`analyze_data_pipeline` 内部 try/except + `stage_results` 记录)
+
+**降级 / 故障处理**:
+- 单 MCP 不可达 → 该 stage 报错, 其他 stage 继续
+- 整条管道全失败 → `summary.coverage_pct < 50%` 时, AI Suggestion 提"pipeline broken" 告警
+- LLM 路由 → 走 `deepseek-v4 → gpt-5` fallback (PII 先 mask)
+
+**为什么是"系统功能"而非"Ad-hoc LLM 行为"**:
+1. **可预测**: 同样的 use case, 同样的输入, 同样的输出 (LLM 不参与主流程, 只参与 enrich)
+2. **可观测**: 每次 trigger 输出 `duration_ms` / `coverage_pct` / `stage_results`
+3. **可调度**: CronJob / CI 直接调, 不依赖 LLM availability
+4. **可审计**: `ai_skill_runs` 表记录每次调用 (M3.5+)
+5. **可回放**: 资产/血缘 全部以 `fqn` 索引, 重新跑结果一致
+
+**实现位置**:
+- 路由: `apps/api/src/idm_api/routers/use_case_trigger.py` + `routers/scan.py`
+- 脚本: `trigger_pipeline_demo.py` (M1.5 改为调新端点)
+- BDD: `tests/bdd/features/use_case_trigger.feature` (5 个 scenario)
 
 ---
 

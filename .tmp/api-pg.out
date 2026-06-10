@@ -1,0 +1,27 @@
+INFO:     Started server process [19872]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
+INFO:     127.0.0.1:19031 - "GET /health/ready HTTP/1.1" 200 OK
+INFO:     127.0.0.1:19034 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:19037 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:19044 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:27539 - "GET /api/health/ready HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:45398 - "GET /api/health/ready HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:7085 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7086 - "GET /api/v1/suggestions?status=pending&limit=10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:3867 - "GET /api/v1/owners?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:3086 - "GET /api/health/ready HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:32410 - "GET /api/health/ready HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:54648 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58122 - "GET /api/v1/suggestions?status=pending&limit=10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36885 - "GET /api/health/ready HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36884 - "GET /api/v1/owners?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36887 - "GET /api/health/ready HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36889 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:10552 - "GET /api/v1/assets/6857be6b-ded0-4543-90ed-797f07dfaffc/pii-summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:10551 - "GET /api/v1/assets/6857be6b-ded0-4543-90ed-797f07dfaffc/columns HTTP/1.1" 200 OK
+INFO:     127.0.0.1:13400 - "GET /api/v1/assets/6857be6b-ded0-4543-90ed-797f07dfaffc/lineage?depth=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46530 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:13404 - "POST /api/v1/scan/asset HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47397 - "GET /api/v1/assets/946ff640-fad3-4d0e-b5ce-52317e234043/lineage?depth=2 HTTP/1.1" 200 OK

@@ -384,6 +384,76 @@ export const UseCasesApi = {
   remove: (id: string) => api.delete<void>(`/v1/use-cases/${id}`).then((r) => r.data),
 };
 
+// === Use Case Trigger / Re-scan (M1.5 业务级 + 系统级) ===
+export interface UseCaseTriggerRequest {
+  use_case_id?: string;
+  stages?: number[]; // null/缺省 = use_case.sources 全量
+  dry_run?: boolean;
+  apply?: boolean;
+}
+
+export interface UseCaseTriggerResponse {
+  ok: boolean;
+  use_case_id: string;
+  stage: number | null;
+  output: {
+    items: Array<Record<string, unknown>>;
+    summary: Record<string, unknown>;
+  };
+  error: string | null;
+  duration_ms: number;
+}
+
+export interface RescanAssetRequest {
+  source_type: "gcs" | "clickhouse" | "superset_export" | "superset_db" | "github" | "dbt" | "mex" | "all";
+  bucket?: string;
+  database?: string;
+  service_name?: string;
+  dry_run?: boolean;
+}
+
+export interface RescanAssetResponse {
+  ok: boolean;
+  source_type: string;
+  items_count: number;
+  by_subtype: Record<string, number>;
+  output: Record<string, unknown>;
+  error: string | null;
+  duration_ms: number;
+}
+
+export const UseCaseTriggerApi = {
+  // 业务级: 跑 use case 全量 (或按 stages 过滤)
+  trigger: (id: string, payload: UseCaseTriggerRequest = {}) =>
+    api
+      .post<UseCaseTriggerResponse>(`/v1/use-cases/${id}/trigger`, {
+        use_case_id: id,
+        apply: true,
+        ...payload,
+      })
+      .then((r) => r.data),
+  // 业务级: 重扫 (语义别名)
+  rescan: (id: string, payload: UseCaseTriggerRequest = {}) =>
+    api
+      .post<UseCaseTriggerResponse>(`/v1/use-cases/${id}/rescan`, {
+        use_case_id: id,
+        apply: true,
+        ...payload,
+      })
+      .then((r) => r.data),
+  // 业务级: 单阶段 (1..6)
+  triggerStage: (id: string, stage: number, dryRun = false) =>
+    api
+      .post<UseCaseTriggerResponse>(`/v1/use-cases/${id}/stages/${stage}/trigger`, {
+        stage,
+        dry_run: dryRun,
+      })
+      .then((r) => r.data),
+  // 系统级: 按 source_type 扫资源 (不依赖 use case)
+  rescanAssets: (payload: RescanAssetRequest) =>
+    api.post<RescanAssetResponse>("/v1/scan/asset", payload).then((r) => r.data),
+};
+
 // === Search ===
 export type SearchKind = "asset" | "owner" | "tag" | "glossary" | "use_case" | "suggestion";
 

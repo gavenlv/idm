@@ -718,6 +718,170 @@ cd migrations && timeout 30s uv run --no-progress alembic upgrade head --sql | h
 
 ---
 
+## 16.6 触发与 Re-scan 子系统 (M1.5+ 业务级 + 系统级入口, 2026-06-09 增)
+
+> **背景**: 资产 / 血缘是"活的", 上游 GCS / Flink / ClickHouse / Superset 每天都在变。
+> "重新扫描" **不能依赖 LLM 临时起意** 调用 Skill, 必须有平台级一等公民入口。
+> §16.5 的"自动执行"是 Agent 自身的执行纪律, §16.6 是"系统对外"的触发契约。
+
+### 16.6.0 总则 (TL;DR)
+
+> **两套入口, 按场景选**:
+>
+> | 入口 | 路径前缀 | 触发方 | 需要 use case? |
+> | --- | --- | --- | --- |
+> | **业务级** | `/api/v1/use-cases/{id}/...` | 业务人员 / UI / CronJob | ✅ |
+> | **系统级** | `/api/v1/scan/asset` | 平台 / 运维 / ChatOps | ❌ |
+>
+> **铁律**:
+> 1. **幂等**: 所有 scan 走 `upsert`, 重复跑无副作用
+> 2. **超时控制**: 单 skill 30s (skill_runner 内部), 总时长由 client 控制
+> 3. **不阻塞**: client 用 streaming / long-polling
+> 4. **不替代主动 Skill 调用**: 这些是"系统入口", Agent 在 chat / ReAct 上下文里仍可直接 `run_skill()`
+
+### 16.6.1 业务级入口 (按 use case 跑)
+
+| 端点 | 方法 | 用途 | 典型场景 |
+| --- | --- | --- | --- |
+| `/api/v1/use-cases/{uc_id}/trigger` | POST | 跑 use case 编排 (全 6 阶段或按 stages 过滤) | "我改了 YAML, 帮我跑一次" |
+| `/api/v1/use-cases/{uc_id}/rescan` | POST | `/trigger` 的语义别名 (强调"重扫") | UI "Rescan" 按钮 / 周期任务 |
+| `/api/v1/use-cases/{uc_id}/stages/{n}/trigger` | POST | 单阶段触发 (1..6) | "只想重扫阶段 3 (MEX)" |
+
+**Request Body** (`UseCaseTriggerRequest`):
+
+```json
+{
+  "stages": [1, 3, 5],   // 可选: 只跑这些 stage 号; 缺省 = use_case.sources 全量
+  "apply": true,          // true=直接写 KG, false=dry-run
+  "dry_run": false        // 与 apply 互斥时优先 dry_run
+}
+```
+
+**调用示例**:
+
+```bash
+# 全量跑 (默认)
+curl -sf -X POST http://localhost:8080/api/v1/use-cases/shop-orders-mex-pipeline/trigger \
+  -H 'Content-Type: application/json' -d '{"apply":true}'
+
+# 只跑阶段 3 (MEX)
+curl -sf -X POST http://localhost:8080/api/v1/use-cases/shop-orders-mex-pipeline/stages/3/trigger \
+  -H 'Content-Type: application/json' -d '{}'
+
+# 重扫 (语义别名, 与 /trigger 等价)
+curl -sf -X POST http://localhost:8080/api/v1/use-cases/shop-orders-mex-pipeline/rescan \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+### 16.6.2 系统级入口 (按 source_type 跑, 不依赖 use case)
+
+**端点**: `POST /api/v1/scan/asset`
+
+**Request Body** (`RescanAssetRequest`):
+
+```json
+{
+  "source_type": "gcs",              // gcs | clickhouse | superset_export | all
+  "bucket": "company-raw",           // 仅 gcs
+  "database": "shop",                // 仅 clickhouse
+  "service_name": "superset-demo",   // 仅 superset_export
+  "dry_run": false
+}
+```
+
+**调用示例**:
+
+```bash
+# 按 bucket 扫 GCS (含 1=raw, 2=model-input, 4=model-output)
+curl -sf -X POST http://localhost:8080/api/v1/scan/asset \
+  -H 'Content-Type: application/json' \
+  -d '{"source_type":"gcs","bucket":"company-raw"}'
+
+# 扫整个 ClickHouse database
+curl -sf -X POST http://localhost:8080/api/v1/scan/asset \
+  -H 'Content-Type: application/json' \
+  -d '{"source_type":"clickhouse","database":"shop"}'
+
+# 全部 (GCS + CH + Superset)
+curl -sf -X POST http://localhost:8080/api/v1/scan/asset \
+  -H 'Content-Type: application/json' \
+  -d '{"source_type":"all"}'
+```
+
+### 16.6.3 业务级 vs 系统级选择决策
+
+| 场景 | 用哪个 | 原因 |
+| --- | --- | --- |
+| 业务人员改完 YAML, 想跑一次 | **业务级** | YAML 已经是"业务契约", 跑它最自然 |
+| UI "Rescan" 按钮 | **业务级** | 业务视角 |
+| CronJob 整条管道重扫 | **业务级** | 一份 use case = 一条管道 |
+| 接新 GCS bucket, 还没建 use case | **系统级** | 没有 use case 上下文 |
+| ClickHouse 恢复后扫一遍 | **系统级** | 失败恢复, 业务无关 |
+| Slack /bot `idm-rescan gcs --bucket=foo` | **系统级** | ChatOps, 需要按 source_type |
+| 周期任务"全平台扫" | **系统级** (`source_type=all`) | 一次性覆盖所有源 |
+
+### 16.6.4 响应格式 (统一)
+
+```json
+{
+  "ok": true,
+  "use_case_id": "shop-orders-mex-pipeline",  // 业务级有, 系统级为 null
+  "source_type": "gcs",                       // 系统级有
+  "items_count": 5,
+  "by_subtype": {"gcs_object": 5},
+  "output": { "blocks": [...] },
+  "error": null,
+  "duration_ms": 1234
+}
+```
+
+### 16.6.5 Agent 调用约定 (本仓库)
+
+```python
+# 业务级 - 业务视角
+result = await run_skill(
+    "analyze_data_pipeline",
+    inputs={"use_case": use_case_dict, "apply": True},
+    use_case_id="shop-orders-mex-pipeline",
+    db=db,
+)
+
+# 系统级 - 资源视角
+result = await run_skill(
+    "discover_gcs_assets",
+    inputs={"bucket": "company-raw", "stage": 1, "source_role": "raw", "apply": True},
+    db=db,
+)
+```
+
+**禁止**:
+- ❌ 业务级用业务级, 但 source 写一半不完整 (半套数据)
+- ❌ 在 chat / ReAct 上下文里调 `/api/v1/scan/asset` (那是 HTTP 层入口, Agent 直接 `run_skill()` 即可)
+- ❌ 改 use case YAML 后忘了 `/trigger` (改完不跑 = 不生效)
+
+### 16.6.6 端到端验证 (M1.5+ 必有)
+
+```bash
+# 1) 业务级 - 全 6 阶段
+curl -sf -X POST http://localhost:8080/api/v1/use-cases/shop-orders-mex-pipeline/trigger \
+  -H 'Content-Type: application/json' -d '{"apply":false}' | jq .ok   # → true
+
+# 2) 业务级 - 单阶段
+curl -sf -X POST http://localhost:8080/api/v1/use-cases/shop-orders-mex-pipeline/stages/3/trigger \
+  -H 'Content-Type: application/json' -d '{}' | jq .ok                 # → true
+
+# 3) 系统级 - GCS
+curl -sf -X POST http://localhost:8080/api/v1/scan/asset \
+  -H 'Content-Type: application/json' \
+  -d '{"source_type":"gcs","bucket":"company-raw"}' | jq .ok           # → true
+
+# 4) 幂等 - 再跑一次业务级, ok 仍为 true, 但写入数据无变化 (upsert)
+```
+
+**BDD 覆盖**: `apps/api/tests/bdd/features/use_case_trigger.feature` (5 个场景, 包含幂等性 / 404 / 单阶段 / 系统级)。
+
+---
+
 ## 17. 配套阅读 (按重要性)
 
 ### 17.1 必读 (5 分钟内看完)
@@ -805,7 +969,7 @@ cd migrations && timeout 30s uv run --no-progress alembic upgrade head --sql | h
 | **Skill #2** | `apps/api/src/idm_api/skills/builtin/infer_table_description.py` | LLM 推断描述→`ai_suggestion.pending` |
 | **Skill #3** | `apps/api/src/idm_api/skills/builtin/classify_pii_columns.py` | LLM 推断 PII→`ai_suggestion.pii_class` |
 | **Skill #4-9** | `apps/api/src/idm_api/skills/builtin/{parse_dbt_manifest,analyze_dbt_code,parse_superset_dashboard,infer_table_owners,nl2sql,detect_anomalies}.py` | 见各文件 |
-| **Routers** | `apps/api/src/idm_api/routers/{health,services,assets,suggestions,skills,owners,feedback}.py` | 全部 `/api/v1/...` REST |
+| **Routers** | `apps/api/src/idm_api/routers/{health,services,assets,suggestions,skills,owners,feedback,use_case_trigger,scan}.py` | 全部 `/api/v1/...` REST (含 use_case_trigger + scan 业务级/系统级 Re-scan 入口) |
 | **Eval Harness** | `apps/api/src/idm_api/eval/{types,judge,runner,cli,feedback}.py` | Gold Snapshot + LLM-judge + fallback + 用户反馈 → few-shot |
 | **Eval Cases** | `apps/api/src/idm_api/eval/cases/*.jsonl` | 5 个 skill 的 gold cases (3-3 条/技能) |
 | **前端 (骨架)** | `apps/web/src/{ui,pages,App.tsx}` | ag-grid Community + 自研 UI Kit, **5 个页面** (Assets/Skills/Suggestions/Health) |
@@ -885,6 +1049,12 @@ cd migrations && timeout 30s uv run --no-progress alembic upgrade head --sql | h
 | **回滚 / port-forward 脚本** | ✅ | `deploy/aliyun/rollback.sh` / `port-forward.sh` |
 | **部署文档** | ✅ | `deploy/aliyun/README.md` (含架构图 / 镜像 / Secret / ALB / 成本估算) |
 | **自动化执行铁律** | ✅ | §16.5 已加入本文档 (总则 + 规约 + 模板 + 自检 + BDD 调用 + 常见陷阱), 所有 Agent 命令必须 timeout 30s + 非阻塞 |
+| **本地快速启动模式 (SQLite)** | ✅ | `apps/api/scripts/start_local.py` 一键启动 0 依赖 API, 用于 demo / 烟囱测试; 主路径仍是 PG |
+| **Re-scan 子系统 (业务级)** | ✅ | `/api/v1/use-cases/{id}/{trigger,rescan,stages/{n}/trigger}`, 业务人员 / UI / CronJob 入口 |
+| **Re-scan 子系统 (系统级)** | ✅ | `/api/v1/scan/asset {source_type, bucket, database}`, 平台 / 运维 / ChatOps 入口 |
+| **Re-scan BDD 覆盖** | ✅ | `tests/bdd/features/use_case_trigger.feature` 5 个场景 (含幂等性 + 404 + 单阶段) |
+| **系统初始化文档** | ✅ | `docs/design/initialization.md` + `scripts/{bootstrap.sh,bootstrap.bat,rescan_pipeline.sh,rescan_pipeline.bat}` |
+| **MCP fail-soft 启动** | ✅ | `init_mcp_async` 单个 MCP 不可达不阻塞 API 启动, 仅记 log |
 
 ### 19.6 不要重复造轮子 (Do NOT Re-Implement)
 

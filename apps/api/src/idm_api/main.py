@@ -13,7 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from idm_api import __version__
 from idm_api.config import get_settings
 from idm_api.db import dispose_engine, get_engine
-from idm_api.routers import assets, chatbi, feedback, glossary, health, idm_self_mcp, impact, owners, quality, search, services, skills, suggestions, tags, use_cases
+from idm_api.routers import (
+    assets, chatbi, feedback, glossary, health, idm_self_mcp, impact, owners, quality, scan, search, services, skills, suggestions, tags, use_case_trigger, use_cases,
+)
 from idm_api.skills import mcp as mcp_sidecar  # 注册 builtin skills via import side-effect
 
 # 显式 import builtin skills 让 @skill 装饰器触发
@@ -84,6 +86,8 @@ app.include_router(owners.router, prefix="/api/v1/owners", tags=["owners"])
 app.include_router(tags.router, prefix="/api/v1/tags", tags=["tags"])
 app.include_router(glossary.router, prefix="/api/v1/glossary", tags=["glossary"])
 app.include_router(use_cases.router, prefix="/api/v1/use-cases", tags=["use-cases"])
+app.include_router(use_case_trigger.router, prefix="/api/v1/use-cases", tags=["use-cases"])
+app.include_router(scan.router, prefix="/api/v1/scan", tags=["scan"])
 app.include_router(search.router, prefix="/api/v1/search", tags=["search"])
 app.include_router(impact.router, prefix="/api/v1/impact", tags=["impact"])
 app.include_router(quality.router, prefix="/api/v1/quality", tags=["quality"])

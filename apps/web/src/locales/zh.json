@@ -189,6 +189,39 @@
     "title": "用户反馈",
     "subtitle": "采纳 / 拒绝 Skill 输出, 提升 Few-Shot 质量"
   },
+  "use_cases": {
+    "title": "Use Case",
+    "subtitle": "GitOps YAML 编排 + 业务级触发与重扫",
+    "trigger": {
+      "button": "触发",
+      "rescan": "重扫",
+      "rescanBusy": "重扫中…",
+      "triggerBusy": "触发中…",
+      "stageLabel": "阶段",
+      "stageAll": "全部",
+      "dryRun": "Dry-run",
+      "run": "执行",
+      "running": "执行中…",
+      "result": "上次执行结果",
+      "noResult": "尚未执行, 点击触发或重扫按钮开始。",
+      "okBadge": "成功",
+      "failBadge": "失败",
+      "duration": "耗时",
+      "itemsCount": "items",
+      "bySubtype": "按类型",
+      "viewOutput": "查看输出",
+      "hideOutput": "收起输出",
+      "stagesExecuted": "执行的阶段",
+      "stageResults": "阶段结果",
+      "stageOk": "成功",
+      "stageFailed": "失败",
+      "hint": "触发: 跑全 6 阶段管道。重扫: 幂等别名, 重复跑不会重复写。两者都会写入 KG。",
+      "sysRescan": "系统级重扫",
+      "sysRescanGcs": "GCS bucket",
+      "sysRescanCh": "ClickHouse db",
+      "sysRescanAll": "全部数据源"
+    }
+  },
   "quality": {
     "title": "数据质量",
     "subtitle": "规则 / 基线 / 异常事件 / 表健康分"

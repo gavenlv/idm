@@ -115,7 +115,7 @@ async def _detect_null_spike(
             await ctx.db.execute(
                 select(ColumnAsset).where(
                     ColumnAsset.table_id == table.id,
-                    ColumnAsset.is_nullable == False,  # noqa: E712
+                    ColumnAsset.nullable == False,  # noqa: E712
                 ).limit(20)
             )
         ).scalars().all()

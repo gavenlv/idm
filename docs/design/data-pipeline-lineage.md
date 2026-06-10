@@ -763,7 +763,10 @@ uv run --no-progress python -m idm_api.verify_pipeline_fixtures
 9/9 stages passed
 ```
 
-#### 方式 B: 触发 IDM API (生产模式)
+#### 方式 B: 触发 IDM API (生产模式, 业务级入口)
+
+> **业务级入口**: 业务人员 / UI / CronJob 按 use case 跑全 6 阶段 / 单阶段。
+> 详见 [architecture.md §5.6](./architecture.md#56-触发与-re-scan-子系统-m15-新增--平台自己的主动脉)
 
 ```bash
 # 1) 起 API
@@ -777,7 +780,47 @@ MOCK_GITHUB_ROOT="<root>/idm/fixtures/pipeline-demo/github" \
 uv run --no-progress python trigger_pipeline_demo.py --api http://localhost:8000
 ```
 
-#### 方式 C: 单阶段触发 / 重新扫描
+**直接 curl (无脚本)**:
+
+```bash
+# 业务入口 (use case 触发)
+curl -sf -X POST http://localhost:8000/api/v1/use-cases/shop-orders-mex-pipeline/trigger \
+  -H 'Content-Type: application/json' -d '{"apply":true}'
+
+# 业务入口 (单阶段触发)
+curl -sf -X POST http://localhost:8000/api/v1/use-cases/shop-orders-mex-pipeline/stages/5/trigger \
+  -H 'Content-Type: application/json' -d '{}'
+
+# 业务入口 (重扫, 语义化别名)
+curl -sf -X POST http://localhost:8000/api/v1/use-cases/shop-orders-mex-pipeline/rescan \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+#### 方式 C: 系统级 rescan (不依赖 use case)
+
+> **系统级入口**: 平台 / 运维 / ChatOps 按 source_type 扫资源, 不需要 use case。
+> 适用: "刚接了一个新 GCS bucket" / "ClickHouse 重新连上了" / "周期任务扫全部"
+
+```bash
+# 按 bucket 扫 GCS
+python trigger_pipeline_demo.py --api http://localhost:8000 --sys-rescan gcs --bucket company-raw
+
+# 按 database 扫 ClickHouse
+python trigger_pipeline_demo.py --api http://localhost:8000 --sys-rescan clickhouse --database shop
+
+# 扫 Superset
+python trigger_pipeline_demo.py --api http://localhost:8000 --sys-rescan superset_export
+
+# 全部资源 (GCS + CH + Superset)
+python trigger_pipeline_demo.py --api http://localhost:8000 --sys-rescan all
+
+# 等价 curl:
+curl -sf -X POST http://localhost:8000/api/v1/scan/asset \
+  -H 'Content-Type: application/json' \
+  -d '{"source_type":"gcs","bucket":"company-raw"}'
+```
+
+#### 方式 D: 单阶段触发 / 重新扫描 (业务级)
 
 ```bash
 # 单阶段 (例如只想重扫阶段 3 MEX)
@@ -787,26 +830,35 @@ python trigger_pipeline_demo.py --api http://localhost:8000 --stage 3
 python trigger_pipeline_demo.py --api http://localhost:8000 --rescan
 
 # 组合: 重扫阶段 5 (Flink load + ClickHouse)
-python trigger_pipeline_demo.py --api http://localhost:8000 --stage 5 --rescan
+python trigger_pipeline_demo.py --api http://localhost:8000 --stage 5
 ```
 
-#### 方式 D: CI / Cron (Windows + Linux)
+#### 方式 E: CI / Cron (Windows + Linux)
 
 Linux / macOS:
 ```bash
-# 每 6 小时自动重扫整条管道, 超时 30s 强制结束
+# 一键 bootstrap (冷启动: docker + alembic + 6 阶段管道)
 cd idm
+bash scripts/bootstrap.sh                       # 5 步全跑
+bash scripts/bootstrap.sh --skip-tests          # 跳过 e2e 验证
+
+# 每 6 小时自动重扫整条管道, 超时 30s 强制结束
 bash scripts/rescan_pipeline.sh --full          # 整条 6 阶段
 bash scripts/rescan_pipeline.sh --stage 3       # 只扫 MEX
 ```
 
 Windows (PowerShell / Git Bash):
 ```bat
-:: 在 Git Bash 或 WSL 内:
-bash /d/workspace/github-ai/idm/scripts/rescan_pipeline.sh --full
+:: 一键 bootstrap
+cd idm
+scripts\bootstrap.bat
 
-:: 或在 PowerShell:
-& "D:\workspace\github-ai\idm\scripts\rescan_pipeline.bat" --full
+:: 重扫
+scripts\rescan_pipeline.bat --full
+scripts\rescan_pipeline.bat --stage 3
+
+:: Git Bash 内
+bash /d/workspace/github-ai/idm/scripts/rescan_pipeline.sh --full
 ```
 
 ### 12.3 验证 & 调试清单

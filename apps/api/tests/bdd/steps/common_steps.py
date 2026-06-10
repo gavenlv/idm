@@ -944,3 +944,50 @@ def ok_value(bdd_client, expected):
         assert got is True, f"expected ok=true, got {got}"
     elif expected.lower() == "false":
         assert got is False, f"expected ok=false, got {got}"
+
+
+# ---------------------------------------------------------------------------
+# Use Case Trigger / Re-scan API (M1.5 新增)
+# ---------------------------------------------------------------------------
+
+
+@when(parsers.parse('I trigger use case "{uc_id}" via the system API'))
+def trigger_uc_via_api(bdd_client, uc_id):
+    _ctx(bdd_client)["response"] = bdd_client.post(
+        f"/api/v1/use-cases/{uc_id}/trigger",
+        json={"use_case_id": uc_id, "apply": True},
+    )
+
+
+@when(parsers.parse('I rescan use case "{uc_id}" via the system API'))
+def rescan_uc_via_api(bdd_client, uc_id):
+    _ctx(bdd_client)["response"] = bdd_client.post(
+        f"/api/v1/use-cases/{uc_id}/rescan",
+        json={"use_case_id": uc_id, "apply": True},
+    )
+
+
+@when(parsers.parse('I trigger stage {stage:d} of use case "{uc_id}" via the system API'))
+def trigger_stage_via_api(bdd_client, stage, uc_id):
+    _ctx(bdd_client)["response"] = bdd_client.post(
+        f"/api/v1/use-cases/{uc_id}/stages/{stage}/trigger",
+        json={"stage": stage},
+    )
+
+
+@when(
+    parsers.parse(
+        'I rescan assets of type "{source_type}" with bucket "{bucket}" via the system API'
+    )
+)
+def rescan_assets_via_api(bdd_client, source_type, bucket):
+    _ctx(bdd_client)["response"] = bdd_client.post(
+        "/api/v1/scan/asset",
+        json={"source_type": source_type, "bucket": bucket},
+    )
+
+
+@then("the response body has a use_case_id field")
+def body_has_use_case_id(bdd_client):
+    body = _ctx(bdd_client).get("body") or _ctx(bdd_client)["response"].json()
+    assert "use_case_id" in body, f"missing use_case_id in {body}"

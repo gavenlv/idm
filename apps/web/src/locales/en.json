@@ -189,6 +189,39 @@
     "title": "User Feedback",
     "subtitle": "Accept/reject Skill outputs to improve Few-Shot quality"
   },
+  "use_cases": {
+    "title": "Use Cases",
+    "subtitle": "GitOps-friendly YAML, business trigger & re-scan",
+    "trigger": {
+      "button": "Trigger",
+      "rescan": "Re-scan",
+      "rescanBusy": "Re-scanning…",
+      "triggerBusy": "Triggering…",
+      "stageLabel": "Stage",
+      "stageAll": "All",
+      "dryRun": "Dry-run",
+      "run": "Run",
+      "running": "Running…",
+      "result": "Last run result",
+      "noResult": "Not run yet. Click Trigger or Re-scan to start.",
+      "okBadge": "ok",
+      "failBadge": "failed",
+      "duration": "duration",
+      "itemsCount": "items",
+      "bySubtype": "by subtype",
+      "viewOutput": "View output",
+      "hideOutput": "Hide output",
+      "stagesExecuted": "Stages executed",
+      "stageResults": "Stage results",
+      "stageOk": "ok",
+      "stageFailed": "failed",
+      "hint": "Trigger runs the full 6-stage pipeline. Re-scan is an idempotent alias. Both write to the KG.",
+      "sysRescan": "System re-scan",
+      "sysRescanGcs": "GCS bucket",
+      "sysRescanCh": "ClickHouse db",
+      "sysRescanAll": "All sources"
+    }
+  },
   "quality": {
     "title": "Data Quality",
     "subtitle": "Rules, baselines, anomaly events, table health score"

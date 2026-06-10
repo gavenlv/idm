@@ -32,7 +32,11 @@ class ServiceRead(ServiceBase):
 # === TableAsset ===
 class TableAssetBase(BaseModel):
     name: str = Field(..., max_length=256)
-    fqn: str = Field(..., max_length=512, pattern=r"^[a-z0-9_.:-]+$")
+    # FQN 接受两种格式:
+    #  - 业务标识:  clickhouse-prod.shop.default.orders_daily (service.db.schema.table)
+    #  - URI 风格:  gcs://bucket/path/to/object.csv        (GCS / S3 / external objects)
+    # 未来可加 http://, s3://, bigquery://, k8s:// ... 任何 `proto://...` 形式
+    fqn: str = Field(..., max_length=512, pattern=r"^[a-z0-9_.:/-]+$")
     asset_type: Literal[
         "table", "view", "materialized_view", "dbt_model",
         "dashboard", "superset_dashboard", "superset_chart", "superset_dataset",
@@ -290,6 +294,62 @@ class UseCaseSave(BaseModel):
 class UseCaseListResponse(BaseModel):
     items: list[UseCaseSummary]
     total: int
+
+
+# === Use Case Trigger / Rescan ===
+class UseCaseTriggerRequest(BaseModel):
+    """触发 use case 编排 (全量或单阶段).
+
+    use_case_id: 留空时由 router 从 path 注入
+    stages: None / 空 = 走 use_case.sources 全量 (analyze_data_pipeline)
+    stages: ['1','2',...] = 仅跑指定 stage 号 (按 stage filter)
+    dry_run: True 时所有 skill 走 dry_run, 不写库
+    """
+
+    use_case_id: str | None = None
+    stages: list[int] | None = None
+    dry_run: bool = False
+    apply: bool = True
+
+
+class UseCaseStageRequest(BaseModel):
+    """单阶段触发 (M3.5+ 用于按需 re-scan 某个阶段的资产/血缘)."""
+
+    stage: int = Field(..., ge=1, le=6)
+    dry_run: bool = False
+
+
+class UseCaseTriggerResponse(BaseModel):
+    ok: bool
+    use_case_id: str
+    stage: int | None = None  # None = 全量
+    output: dict[str, Any]
+    error: str | None = None
+    duration_ms: int = 0
+
+
+# === System-wide Re-scan (M3.5+ 资源级) ===
+class RescanAssetRequest(BaseModel):
+    """按 source_type 重扫一组资产."""
+
+    source_type: Literal[
+        "gcs", "clickhouse", "superset_export", "superset_db",
+        "github", "dbt", "mex", "all",
+    ] = "all"
+    bucket: str | None = None  # 仅 gcs
+    database: str | None = None  # 仅 clickhouse
+    service_name: str | None = None
+    dry_run: bool = False
+
+
+class RescanAssetResponse(BaseModel):
+    ok: bool
+    source_type: str
+    items_count: int
+    by_subtype: dict[str, int] = Field(default_factory=dict)
+    output: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+    duration_ms: int = 0
 
 
 # === Search ===
