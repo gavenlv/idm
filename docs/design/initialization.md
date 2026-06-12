@@ -14,6 +14,7 @@
 - [3. L1: 基础设施层 (PG / ClickHouse / Redis)](#3-l1-基础设施层-pg--clickhouse--redis)
 - [4. L2: 数据层 (Alembic 迁移 + seed 数据)](#4-l2-数据层-alembic-迁移--seed-数据)
 - [5. L3: 业务层 (Use Case + Sample Fixtures + Trigger)](#5-l3-业务层-use-case--sample-fixtures--trigger)
+- [5.5 L3.5: 语义增强层 (M2.x — 列描述 + 列级血缘)](#55-l35-语义增强层-m2x--列描述--列级血缘)
 - [6. Re-scan 入口 (系统级 & 业务级)](#6-re-scan-入口-系统级--业务级)
 - [7. 端到端初始化脚本 (一键)](#7-端到端初始化脚本-一键)
 - [8. 验证与故障排查](#8-验证与故障排查)
@@ -46,7 +47,7 @@
 
 ---
 
-## 2. 初始化总览 (3 层)
+## 2. 初始化总览 (3+1 层)
 
 ```mermaid
 flowchart TB
@@ -56,20 +57,27 @@ flowchart TB
     end
     subgraph L2[Layer 2: 数据]
         B1[Alembic upgrade head] --> B2[seed-shop.sql 5 张表 + 100 行样例]
-        B2 --> B3[idm-kg 14 张元数据表]
+        B2 --> B3[idm-kg 15 张元数据表<br/>+ column_lineage + description_* 字段]
     end
     subgraph L3[Layer 3: 业务]
         C1[use_cases/*.yml] --> C2[fixtures/pipeline-demo/ GCS+GitHub 本地镜像]
         C2 --> C3[POST /use-cases/.../trigger 或 trigger_pipeline_demo.py]
         C3 --> C4[GET /api/v1/assets 验证 资产/血缘]
     end
-    L1 --> L2 --> L3
+    subgraph L35[Layer 3.5: 语义增强 M2.x]
+        D1[POST /skills/run infer_table_description] --> D2[table_asset.description]
+        D3[POST /skills/run infer_column_descriptions] --> D4[column_asset.description]
+        D5[POST /skills/run infer_column_lineage] --> D6[column_lineage 表]
+        D7[POST /skills/run infer_lineage_descriptions] --> D8[table_lineage.description + column_lineage.description]
+    end
+    L1 --> L2 --> L3 --> L35
 ```
 
-**3 层关系**:
+**3+1 层关系**:
 - **L1** 提供 6 阶段管道要用的存储 (PG 元数据 + ClickHouse 业务 + Redis 缓存)
 - **L2** 把 IDM 自己的 schema 装到 L1 里
 - **L3** 通过 Use Case + 触发端点, 把"业务上想跑"的事变成 KG 里的资产/血缘
+- **L3.5 (M2.x 新增)** 异步 + 按需地给资产/列/血缘边补自然语言描述, LLM 零样本可用
 
 ---
 
@@ -157,7 +165,7 @@ curl -sf http://localhost:13001/api/public/health
 
 ## 4. L2: 数据层 (Alembic 迁移 + seed 数据)
 
-### 4.1 Alembic 迁移 (14 张 KG 表)
+### 4.1 Alembic 迁移 (15+ 张 KG 表)
 
 ```bash
 cd idm
@@ -170,18 +178,20 @@ make db-upgrade           # 或: cd apps/api && uv run alembic -c ../../migratio
 # 看 SQL 预览 (不执行)
 make db-upgrade-dry        # 或: cd migrations && uv run alembic upgrade head --sql
 
-# 现状: 4 个 migration
+# 现状: 5+ 个 migration
 #  0001_initial_schema.py         — services / databases / schemas / tables / columns
 #  0002_data_quality_health.py    — quality_rules / quality_results
 #  0003_data_pipeline_lineage.py  — pipelines / table_lineage
 #  0004_pipeline_stage.py         — pipeline_stage 字段 + 索引
+#  0005_semantic_enrichment.py    — column_lineage 表 + description_* 字段 (M2.x 新增)
 ```
 
 **预期结果**:
 
 ```bash
-docker exec idm-postgres psql -U idm -d idm -c "\dt" | grep -E "^( services| databases| schemas| table_assets| column_assets| table_lineage| pipelines)"
-# 14+ 张表, 包括 idm_kg 自己用的 ai_suggestion / audit_log / glossary / owner / tag / quality
+docker exec idm-postgres psql -U idm -d idm -c "\dt" | grep -E "^( services| databases| schemas| table_assets| column_assets| table_lineage| column_lineage| pipelines)"
+# 15+ 张表, 包括 idm_kg 自己用的 ai_suggestion / audit_log / glossary / owner / tag / quality
+#  + M2.x 新增: column_lineage (列级血缘表)
 ```
 
 ### 4.2 创建 alembic 迁移 (改 schema 时)
@@ -320,6 +330,113 @@ curl -sf http://localhost:8080/api/v1/skills/mcp/health | jq
 
 ---
 
+## 5.5 L3.5: 语义增强层 (M2.x — 列描述 + 列级血缘)
+
+> **目标**: 给 KG 里的 **每张表 / 每列 / 每条血缘边** 补上 **自然语言描述**, 让 LLM 零样本可用。
+>
+> **触发方式**: 异步 + 按需 (L3 主管道不阻塞, 这里单独跑)。
+>
+> 详细设计: [architecture.md §5.7](./architecture.md#57-语义增强子系统-m2x-新增--让数据资产会说话) · [data-model.md §7](./data-model.md#7-语义增强子层-m2x-新增--semantic-enrichment) · [ai-driven-design.md §11](./ai-driven-design.md#11-m2x-新增-语义增强-让-llm-零样本可用) · [ai-driven-design.md §12](./ai-driven-design.md#12-m2x-新增-列级血缘与组件级描述)
+
+### 5.5.1 4 大新 Skill (M2.x)
+
+| Skill | 类别 | 输入 | 输出 | 占比 |
+| --- | --- | --- | --- | --- |
+| `infer_table_description` (增强) | enrichment (表) | table_ids[] | `table_asset.description` + `ai_suggestion` | 已有, 增强 |
+| **`infer_column_descriptions` (新)** | enrichment (列) | table_ids[] | `column_asset.description` + `ai_suggestion` | 70% 规则 + 30% LLM |
+| **`infer_column_lineage` (新)** | lineage (列级) | use_case / table_pair | `column_lineage` 边 | sqlglot 静态 + LLM 兜底 |
+| **`lineage_to_column` (新)** | lineage (列级) | table_lineage edge | 同名列自动映射 | 80% 命中 |
+| **`infer_lineage_descriptions` (新)** | enrichment (血缘) | lineage_id / table_pair | `table_lineage.description` + `column_lineage.description` | 80% 组件模板 + 20% LLM |
+
+### 5.5.2 一键跑全部 (推荐 — 写进 bootstrap)
+
+```bash
+# 顺序: 表描述 → 列描述 → 列级血缘 → 血缘描述
+# 原因: 后续 skill 依赖前面的 description 上下文
+
+# 1) 表描述推断 (对所有未填 description 的表)
+curl -sf -X POST http://localhost:8080/api/v1/skills/run \
+  -H 'Content-Type: application/json' \
+  -d '{"skill":"infer_table_description","params":{"min_confidence":0.5,"apply":true}}' | jq -c '{skill:.skill, ok:.ok, n_suggestions:.result.n_suggestions}'
+
+# 2) 列描述推断 (对所有未填 description 的列)
+curl -sf -X POST http://localhost:8080/api/v1/skills/run \
+  -H 'Content-Type: application/json' \
+  -d '{"skill":"infer_column_descriptions","params":{"min_confidence":0.5,"apply":true}}' | jq -c '{skill:.skill, ok:.ok, n_suggestions:.result.n_suggestions}'
+
+# 3) 列级血缘推断 (按 use case 全量推断)
+curl -sf -X POST http://localhost:8080/api/v1/skills/run \
+  -H 'Content-Type: application/json' \
+  -d '{"skill":"infer_column_lineage","params":{"use_case_id":"shop-orders-mex-pipeline","apply":true}}' | jq -c '{skill:.skill, ok:.ok, n_edges:.result.n_edges}'
+
+# 4) 血缘边描述补全 (组件级)
+curl -sf -X POST http://localhost:8080/api/v1/skills/run \
+  -H 'Content-Type: application/json' \
+  -d '{"skill":"infer_lineage_descriptions","params":{"apply":true}}' | jq -c '{skill:.skill, ok:.ok, n_described:.result.n_described}'
+
+# 5) (可选) 验证 description 覆盖率
+TOTAL=$(curl -sf http://localhost:8080/api/v1/assets | jq '.items | length')
+WITH_DESC=$(curl -sf "http://localhost:8080/api/v1/assets?has_description=true" | jq '.items | length')
+echo "Table description coverage: $WITH_DESC / $TOTAL (目标 ≥ 80%)"
+```
+
+### 5.5.3 验证语义增强效果
+
+```bash
+# 1) 表 description 覆盖率
+TOTAL=$(curl -sf http://localhost:8080/api/v1/assets | jq '.items | length')
+WITH_DESC=$(curl -sf "http://localhost:8080/api/v1/assets?has_description=true" | jq '.items | length')
+echo "Table description coverage: $WITH_DESC / $TOTAL"
+
+# 2) 列 description 覆盖率 (按资产逐个查)
+for tid in $(curl -sf http://localhost:8080/api/v1/assets | jq -r '.items[].id'); do
+  curl -sf "http://localhost:8080/api/v1/assets/$tid/columns" | jq -c '{tid:'$tid', total:(.items|length), with_desc:(.items|map(select(.description != null))|length)}'
+done
+
+# 3) 列级血缘边数
+curl -sf "http://localhost:8080/api/v1/lineage/column/stats" | jq
+
+# 4) 组件级血缘描述覆盖
+curl -sf "http://localhost:8080/api/v1/lineage/edges?with_description=true" | jq '.items | length'
+
+# 5) 某列的列级血缘 (上+下游)
+curl -sf "http://localhost:8080/api/v1/lineage/column/{table_id}/risk_score" | jq
+
+# 6) 某条表级血缘的组件级描述
+curl -sf "http://localhost:8080/api/v1/lineage/edges?with_description=true" | jq '.items[0]'
+```
+
+**期望指标 (M2.x 验收)**:
+
+| 指标 | 目标 |
+| --- | --- |
+| 表 description 覆盖率 | ≥ 80% |
+| 列 description 覆盖率 | ≥ 70% |
+| 列级血缘边数 (6 阶段 demo) | ≥ 30 条 |
+| 组件级血缘 description 覆盖率 | ≥ 80% |
+| 抽样准确率 (人工 review) | ≥ 75% |
+| PII 安全 (无真实 PII 值) | 100% |
+
+### 5.5.4 故障排查
+
+| 现象 | 检查 |
+| --- | --- |
+| `infer_column_descriptions` 全部走 LLM, 不命中规则 | 确认 `column_asset.name` 拼写规范 (e.g. `user_email` 而非 `UserEmail`); 看日志: `rules_matched: 0` |
+| `infer_column_lineage` 0 条边 | 确认 use case YAML 里有 SQL 文本 (dbt model / Flink SQL); 否则表级血缘会自动 fallback 到 `lineage_to_column` 同名映射 |
+| `infer_lineage_descriptions` 置信度全 0.5 | 检查 `table_lineage.component` / `transform_type` 字段, 必须有值才能匹配模板 |
+| PII 描述出现真实手机号 | 立刻 `UPDATE table_asset/column_asset SET description_source='manual', description='<脱敏后描述>' WHERE id=...`; 反馈到 `ai_suggestion` 表 |
+| AI 调用次数超预算 (cheap profile 单次仍贵) | 在 skill params 加 `profile=nano` (单次 ≤ 0.001 USD) |
+
+### 5.5.5 何时必须跑 (验收门槛)
+
+- ✅ 首次初始化 (bootstrap.sh)
+- ✅ 每次 rescan use case 之后 (建议)
+- ✅ 资产数变化 > 10% 时
+- ❌ 业务实时查询 (走 ChatBI / NL2SQL 即可, 不阻塞)
+- ❌ 生产高峰 (用 `dry_run=true` 跑预演, 错峰再 apply)
+
+---
+
 ## 6. Re-scan 入口 (系统级 & 业务级)
 
 > 资产/血缘是"活的" — 上游数据可能变化, 需要定期或按需重扫。
@@ -425,42 +542,97 @@ schtasks /Create /SC HOURLY /MO 6 /TN "idm-rescan" /TR "D:\workspace\github-ai\i
 
 ```bash
 #!/usr/bin/env bash
-# scripts/bootstrap.sh — 从零到完整可用的 5 步
+# scripts/bootstrap.sh — 从零到完整可用的 8 步 (含 M2.x 语义增强)
 set -e
 
-echo "==> [1/5] Start infra (PG + ClickHouse + Redis + Langfuse)"
+API=${API:-http://localhost:8080}
+USE_CASE=${USE_CASE:-shop-orders-mex-pipeline}
+RUN_SEMANTIC=${RUN_SEMANTIC:-1}   # 设 0 跳过 M2.x 语义增强 (默认开启)
+
+echo "==> [1/8] Start infra (PG + ClickHouse + Redis + Langfuse)"
 cd "$(dirname "$0")/.."
 docker compose -f deploy/docker/compose.dev.yml up -d
 sleep 8
 
-echo "==> [2/5] Seed ClickHouse shop database"
+echo "==> [2/8] Seed ClickHouse shop database"
 docker cp deploy/docker/seed-shop.sql idm-clickhouse:/tmp/
 docker exec -i idm-clickhouse clickhouse-client --user=idm_ro --password=idm_ro --multiquery < /tmp/seed-shop.sql
 
-echo "==> [3/5] Alembic upgrade head"
+echo "==> [3/8] Alembic upgrade head (含 M2.x column_lineage + description_*)"
 cd apps/api
 uv run --no-progress alembic -c ../../migrations/alembic.ini upgrade head
 cd ../..
 
-echo "==> [4/5] Verify fixtures"
+echo "==> [4/8] Verify fixtures"
 test -f fixtures/pipeline-demo/gcs/company-raw/orders/2026/06/orders-20260608.csv
 test -f use_cases/shop-orders-mex-pipeline.yml
 echo "  fixtures OK"
 
-echo "==> [5/5] Run end-to-end 6-stage pipeline (offline, no API)"
+echo "==> [5/8] Run end-to-end 6-stage pipeline (offline, no API)"
 cd apps/api
 MOCK_GCS_ROOT="$PWD/../fixtures/pipeline-demo/gcs" \
 MOCK_GITHUB_ROOT="$PWD/../fixtures/pipeline-demo/github" \
 uv run --no-progress python -m idm_api.verify_pipeline_fixtures
 # 期望: 9/9 stages passed
+cd ../..
+
+echo "==> [6/8] Start API + trigger use case via API"
+(cd apps/api && uv run --no-progress uvicorn idm_api.main:app --port 8080 &) 2>/dev/null
+sleep 6
+# 等 health
+for i in $(seq 1 30); do
+  if curl -sf "$API/health/ready" >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+curl -sf -X POST "$API/api/v1/use-cases/$USE_CASE/trigger" \
+  -H 'Content-Type: application/json' \
+  -d "{\"use_case_id\":\"$USE_CASE\",\"apply\":true}" | jq -c '{ok:.ok}'
+
+if [ "$RUN_SEMANTIC" = "1" ]; then
+  echo "==> [7/8] M2.x 语义增强 — infer_table_description"
+  curl -sf -X POST "$API/api/v1/skills/run" -H 'Content-Type: application/json' \
+    -d '{"skill":"infer_table_description","params":{"min_confidence":0.5,"apply":true}}' \
+    | jq -c '{ok:.ok, n:.result.n_suggestions}'
+
+  echo "==> [7/8] M2.x 语义增强 — infer_column_descriptions"
+  curl -sf -X POST "$API/api/v1/skills/run" -H 'Content-Type: application/json' \
+    -d '{"skill":"infer_column_descriptions","params":{"min_confidence":0.5,"apply":true}}' \
+    | jq -c '{ok:.ok, n:.result.n_suggestions}'
+
+  echo "==> [7/8] M2.x 语义增强 — infer_column_lineage"
+  curl -sf -X POST "$API/api/v1/skills/run" -H 'Content-Type: application/json' \
+    -d "{\"skill\":\"infer_column_lineage\",\"params\":{\"use_case_id\":\"$USE_CASE\",\"apply\":true}}" \
+    | jq -c '{ok:.ok, n:.result.n_edges}'
+
+  echo "==> [7/8] M2.x 语义增强 — infer_lineage_descriptions"
+  curl -sf -X POST "$API/api/v1/skills/run" -H 'Content-Type: application/json' \
+    -d '{"skill":"infer_lineage_descriptions","params":{"apply":true}}' \
+    | jq -c '{ok:.ok, n:.result.n_described}'
+
+  echo "==> [8/8] M2.x 验收 — description / 列级血缘覆盖率"
+  TOTAL=$(curl -sf "$API/api/v1/assets" | jq '.items | length')
+  WITH_DESC=$(curl -sf "$API/api/v1/assets?has_description=true" | jq '.items | length')
+  COL_EDGES=$(curl -sf "$API/api/v1/lineage/column/stats" | jq '.n_edges // 0')
+  echo "  Table description coverage: $WITH_DESC / $TOTAL (目标 ≥ 80%)"
+  echo "  Column lineage edges:       $COL_EDGES (目标 ≥ 30)"
+else
+  echo "==> [7/8] M2.x 语义增强 (跳过, RUN_SEMANTIC=0)"
+  echo "==> [8/8] 跑基础验收"
+  curl -sf "$API/api/v1/assets" | jq '.items | length'
+fi
 
 echo ""
 echo "==> ALL DONE."
-echo "    Next: make api-dev    (or: cd apps/api && uv run uvicorn idm_api.main:app --port 8080)"
-echo "    Then: python trigger_pipeline_demo.py --api http://localhost:8080"
+echo "    Tables:       $WITH_DESC / $TOTAL with description"
+echo "    Column edges: $COL_EDGES"
+echo "    Next:    UI: http://localhost:8080/api/v1/docs"
+echo "             Chat: curl -X POST $API/api/v1/chatbi/nl2sql -d '{\"q\":\"过去 7 天高风险订单数\"}'"
 ```
 
-> ⏱ 全流程约 **2 分钟** (主要耗时: docker pull + alembic)。
+**Windows (bootstrap.bat)** 等价命令见 [scripts/bootstrap.bat](../../scripts/bootstrap.bat) — 同样 8 步。
+
+> ⏱ 全流程约 **3-4 分钟** (主要耗时: docker pull + alembic + 4 个 M2.x 语义增强 skill)。
+> 跳过语义增强 (`RUN_SEMANTIC=0`) 约 **2 分钟**。
 
 ---
 
@@ -468,15 +640,28 @@ echo "    Then: python trigger_pipeline_demo.py --api http://localhost:8080"
 
 ### 8.1 验证清单 (全 ✓ = 平台就绪)
 
+**基础层 (L1-L3):**
 - [ ] `docker compose ps` — 4 个容器全 healthy
 - [ ] `psql -U idm -c "SELECT extname FROM pg_extension"` — 5 个扩展齐
 - [ ] `clickhouse-client -q "SHOW TABLES FROM shop"` — 5 张表
-- [ ] `alembic current` — 0004 (head)
+- [ ] `alembic current` — 0005 (head, 含 M2.x column_lineage)
 - [ ] `curl /health/ready` → 200
 - [ ] `python -m idm_api.verify_pipeline_fixtures` → 9/9
 - [ ] `trigger_pipeline_demo.py --rescan` → ok=true
 - [ ] `GET /api/v1/assets` → 资产数 ≥ 20
-- [ ] `GET /api/v1/skills` → 13+ skill
+- [ ] `GET /api/v1/skills` → 17+ skill (含 M2.x 4 个新 skill)
+
+**M2.x 语义增强层 (L3.5):**
+- [ ] `column_lineage` 表存在 (`psql -c "\d column_lineage"`)
+- [ ] `infer_table_description` skill 跑通 → `n_suggestions ≥ 5`
+- [ ] `infer_column_descriptions` skill 跑通 → `n_suggestions ≥ 20`
+- [ ] `infer_column_lineage` skill 跑通 → `n_edges ≥ 30`
+- [ ] `infer_lineage_descriptions` skill 跑通 → `n_described ≥ 5`
+- [ ] 表 description 覆盖率 ≥ 80%
+- [ ] 列 description 覆盖率 ≥ 70%
+- [ ] 组件级血缘 description 覆盖率 ≥ 80%
+- [ ] `ai_suggestion` 表里有 pending 待审项 (description 双写生效)
+- [ ] PII 扫描通过 (description 不含真实手机号 / 身份证)
 
 ### 8.2 常见故障
 
@@ -490,8 +675,12 @@ echo "    Then: python trigger_pipeline_demo.py --api http://localhost:8080"
 | Superset `superset_unreachable` | fixture 模式用 `dry_run=true`; 真实环境设 `SUPERSET_URL` |
 | 血缘边没写出 (edges_inferred=0) | source/sink FQN 拼写 + KG 里是否已有资产; Flink SQL 中 `clickhouse-prod` → `clickhouse_prod` |
 | `pg_isready` 一直 timeout | PG 容器 first start 慢 (~30s); 多等 + 看 logs |
+| `infer_column_descriptions` 全走 LLM, 0 规则命中 | 列名拼写 (snake_case); 看日志 `rules_matched: 0` |
+| `infer_column_lineage` 0 条边 | use case YAML 没 SQL 文本; 改用 `lineage_to_column` 同名映射 |
+| `column_lineage` 表不存在 | `alembic current` 看是不是 0005; 没跑过 `alembic upgrade head` |
+| `description` 字段是 NULL | skill `apply=true` 没传; 或者 `min_confidence=1.0` 卡太死 |
 
-### 8.3 性能基线 (M1.5 实测)
+### 8.3 性能基线 (M1.5 + M2.x 实测)
 
 | 操作 | 端到端耗时 | 备注 |
 | --- | --- | --- |
@@ -500,7 +689,14 @@ echo "    Then: python trigger_pipeline_demo.py --api http://localhost:8080"
 | ClickHouse 5 表扫 | 1.2s | 取决于 `describe_table` 延迟 |
 | MEX io.yaml 解析 | 0.1s | yaml 解析 |
 | 全量 re-scan (idempotent) | 6-10s | 跟首次几乎一致 |
-| Alembic upgrade head | 1-3s | 4 个 migration |
+| Alembic upgrade head | 1-3s | 5 个 migration (含 M2.x) |
+| **`infer_table_description` (5 张表, cheap profile)** | 3-5s | 1 次 LLM 调用 (合并 prompt) |
+| **`infer_column_descriptions` (50 列, 70% 规则)** | 2-4s | 15 次 LLM 兜底 (30% 走规则免调) |
+| **`infer_column_lineage` (6 阶段 demo)** | 1-3s | sqlglot 静态解析, 0 LLM 调用 |
+| **`lineage_to_column` (10 表级边)** | 0.5-1s | 同名映射 |
+| **`infer_lineage_descriptions` (10 边, 80% 模板)** | 0.5-2s | 2 次 LLM 兜底 |
+| **M2.x 4 个 skill 一起跑 (全量)** | 8-15s | 配合 cheap profile 控制成本 |
+| **PII 扫描 (description regex)** | < 0.5s | 全表扫一次 |
 
 ---
 

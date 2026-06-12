@@ -24,6 +24,7 @@
   - [5.4 LLM Gateway](#54-llm-gateway-统一路由)
   - [5.5 Delivery Layer](#55-delivery-layer-交付层)
   - [**5.6 触发与 Re-scan 子系统 (M1.5 新增)**](#56-触发与-re-scan-子系统-m15-新增--平台自己的主动脉)
+  - [**5.7 语义增强子系统 (M2.x 新增 — 让数据资产"会说话")**](#57-语义增强子系统-m2x-新增--让数据资产会说话)
 - [6. 技术栈映射](#6-技术栈映射)
 - [7. 数据流：端到端生命周期](#7-数据流端到端生命周期)
 - [8. 与现有栈的集成](#8-与现有栈的集成)
@@ -576,6 +577,125 @@ flowchart LR
 - 路由: `apps/api/src/idm_api/routers/use_case_trigger.py` + `routers/scan.py`
 - 脚本: `trigger_pipeline_demo.py` (M1.5 改为调新端点)
 - BDD: `tests/bdd/features/use_case_trigger.feature` (5 个 scenario)
+
+### 5.7 语义增强子系统 (M2.x 新增 — 让数据资产"会说话")
+
+> **问题**: 资产 / 血缘 / 列 — 在 KG 里都是干瘪的 FQN 和字段名, LLM 用不上。
+> **目标**: 让 **每张表 / 每列 / 每条血缘边** 都有 **自然语言描述**, LLM 零样本可用。
+>
+> 详见 [data-model.md §7](./data-model.md#7-语义增强子层-m2x-新增--semantic-enrichment) · [data-pipeline-lineage.md §4.3](./data-pipeline-lineage.md#43-m2x-新增-列级血缘--语义描述-semantic-enrichment) · [skills-design.md §X](./skills-design.md)
+
+```mermaid
+flowchart LR
+    subgraph 输入[输入信号]
+        S1[表/列/样本数据<br/>Table name + Columns + Sample values]
+        S2[血缘边<br/>transform_type + component + sql]
+        S3[外部知识<br/>Glossary terms + PII class]
+    end
+
+    subgraph 启发[启发式规则 (零 LLM 调用)]
+        H1[列名模式匹配<br/>e.g. *_id → PK/FK<br/>email → PII 邮箱]
+        H2[值模式匹配<br/>e.g. ISO 国家码, 11 位手机]
+        H3[组件描述模板<br/>e.g. airflow_task → "由 Airflow DAG X 的 task Y 复制"]
+    end
+
+    subgraph LLM[LLM 兜底 (当规则置信度 < 0.8)]
+        L1[infer_table_description<br/>profile=cheap]
+        L2[infer_column_descriptions<br/>profile=cheap]
+        L3[infer_lineage_descriptions<br/>profile=cheap]
+    end
+
+    subgraph 输出[输出 (M2.x 增强)]
+        O1[table_asset.description<br/>+ description_source<br/>+ description_rationale]
+        O2[column_asset.description<br/>+ description_source<br/>+ description_rationale]
+        O3[table_lineage.description<br/>+ column_lineage.description<br/>+ column_lineage.transform_expression]
+        O4[ai_suggestion (待人工 review)]
+    end
+
+    S1 --> H1
+    S1 --> H2
+    S2 --> H3
+    S1 --> L1
+    S1 --> L2
+    S2 --> L3
+    S3 --> L1
+    S3 --> L2
+
+    H1 --> O2
+    H2 --> O2
+    H3 --> O3
+    L1 --> O1
+    L2 --> O2
+    L3 --> O3
+
+    L1 --> O4
+    L2 --> O4
+    L3 --> O4
+```
+
+#### 5.7.1 三大能力
+
+| 能力 | Skill (M2.x 新增) | 输入 | 输出 |
+| --- | --- | --- | --- |
+| **表描述推断** | `infer_table_description` (增强) | table_ids[] | `table_asset.description` + `ai_suggestion` |
+| **列描述推断** (新) | `infer_column_descriptions` (新) | table_ids[] | `column_asset.description` + `ai_suggestion` |
+| **列级血缘** (新) | `infer_column_lineage` (新) + `lineage_to_column` (新) | use_case / table_pair | `column_lineage` 边 (含 transform_expression) |
+| **组件级血缘描述** (新) | `infer_lineage_descriptions` (新) | lineage_id / table_pair | `table_lineage.description` + `column_lineage.description` |
+
+#### 5.7.2 三层输入信号 + 权重
+
+| 层级 | 占比 | 来源 | 用途 |
+| --- | --- | --- | --- |
+| **规则层 (零 LLM)** | 70% | 列名模式 / 数据类型 / 样本值 / PII 分类 / 组件模板 | 命中即用, 高置信度 (≥0.85) |
+| **LLM 兜底层** | 25% | DeepSeek V4 cheap profile | 规则未命中, LLM 补全 |
+| **人工审核层** | 5% | `ai_suggestion` 待审 | AI 推断的所有结果都先入 suggestion, 人工一键 confirm |
+
+#### 5.7.3 关键设计决策
+
+| 决策 | 选 A | 选 B | IDM 选 | 理由 |
+| --- | --- | --- | --- | --- |
+| **推断时机** | 同步 (写 KG 时立即推断) | 异步 (后台 batch) | **异步 + 按需** | 不阻塞 6 阶段管道; 用 `infer_*_descriptions` skill 单独触发 |
+| **存储形式** | description 直接覆盖 | description + `ai_suggestion` 双写 | **双写** | AI in the Loop — 人工可 review, 拒绝即生效 |
+| **列级血缘来源** | 全部调 LLM 推断 | SQL parser 静态 + LLM 兜底 | **静态优先** | SQL parser 准确率 100% (e.g. sqlglot), 节约 LLM token |
+| **描述长度** | 50 字 | 200 字 | **30-120 字 (按层级)** | 表: 60-120, 列: 30-60, 血缘: 20-50 |
+| **PII 脱敏** | description 含真实值 | description 只描述"类型" | **只描述类型** | 合规优先 (e.g. "包含 11 位手机号" 而非 "13800138000") |
+| **置信度阈值** | 全部接受 | 全人工 review | **≥ 0.7 直接写, < 0.7 入 suggestion** | 平衡效率与准确率 |
+
+#### 5.7.4 6 阶段管道样例 (M2.x 增强前后对比)
+
+| 资产/边 | M1.5 (无 description) | M2.x (有 description) |
+| --- | --- | --- |
+| `gcs://company-raw/orders/2026/06/orders-20260608.csv` | (无) | "原始订单数据 (2026-06-08), 包含订单编号、用户、金额、商品等字段, 一行 = 一个订单" |
+| `clickhouse-prod.shop.stg_orders` | (无) | "订单预处理临时表, 来自 Airflow etl_orders_daily 的中间落盘, 字段经类型转换" |
+| `clickhouse-prod.shop.fct_orders_risk_daily` | (无) | "订单风险事实表 (天粒度), 一行 = 一个用户 × 一天, 包含日风险分汇总" |
+| 列 `risk_score` | (无) | "风险评分 (0-1), 由 MEX 模型 risk_score_v2 派生, 值越大风险越高" |
+| 列 `user_id` | (无) | "用户 ID, 关联 dim_users 表, UInt64 类型" |
+| 边 `gcs-orders → stg_orders` | `transform=airflow_task, conf=0.95` | "由 Airflow DAG `etl_orders_daily` 的 task `preprocess_orders` 复制到下游" |
+| 边 `model-input/orders → model-output/risk` | `transform=mex_model, conf=0.85` | "MEX 黑盒模型 `risk_score_v2` 派生表达式 `model.predict_proba([amount, age, ...])`" |
+| 边 `fct_orders_risk_daily.risk_score → superset.dashboard.1.risk_trend` | (无列级血缘) | 列级血缘: `risk_score` 由 `risk_score` 透传, transform=`passthrough`, source=`superset_query` |
+
+#### 5.7.5 LLM 视角: 描述前后查询质量对比
+
+**Before (M1.5, 干瘪 FQN)**:
+
+```text
+User: 过去 7 天高风险订单有多少?
+LLM: 我看到 clickhouse-prod.shop.fct_orders_risk_daily, 但不知道它的列含义。能否告诉我 risk_score / day 字段是干嘛的?
+User: risk_score 是 0-1 风险分, day 是日期, risk_level 是 high/medium/low。
+LLM: SELECT day, count(*) FROM fct_orders_risk_daily WHERE risk_level='high' AND day >= today() - 7 GROUP BY day
+```
+
+**After (M2.x, 有 description)**:
+
+```text
+User: 过去 7 天高风险订单有多少?
+LLM (直接读 description): "fct_orders_risk_daily" 是订单风险事实表 (天粒度), 一行 = 一个用户 × 一天,
+   包含 risk_score (0-1 风险分) 和 risk_level (high/medium/low) 字段。
+SQL: SELECT day, count(DISTINCT user_id) FROM fct_orders_risk_daily
+     WHERE risk_level='high' AND day >= today() - 7 GROUP BY day
+```
+
+→ **LLM 零样本可用**, 不再需要业务人员解释字段含义。
 
 ---
 

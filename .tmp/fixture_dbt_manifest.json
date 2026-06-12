@@ -13,6 +13,7 @@
       "database": "shop",
       "schema": "default",
       "description": "用户维度表, 整合来自 raw 层和 clickstream 的用户画像.",
+      "raw_code": "{{ config(materialized='table') }}\n\nWITH first_orders AS (\n  SELECT user_id, MIN(created_at) AS first_order_at\n  FROM {{ ref('stg_orders') }}\n  WHERE status = 'paid'\n  GROUP BY user_id\n)\nSELECT\n  u.id          AS user_id,\n  u.email       AS email,\n  u.phone       AS phone,\n  cs.name_zh    AS country,\n  fo.first_order_at\nFROM {{ source('raw', 'users') }} u\nLEFT JOIN first_orders fo ON fo.user_id = u.id\nLEFT JOIN {{ ref('country_seed') }} cs ON cs.code = u.country_code\n",
       "columns": {
         "user_id": {"name": "user_id", "data_type": "Int64", "description": "用户主键"},
         "email": {"name": "email", "data_type": "String", "description": "用户邮箱, PII"},
@@ -20,7 +21,7 @@
         "country": {"name": "country", "data_type": "String", "description": "国家代码"},
         "first_order_at": {"name": "first_order_at", "data_type": "DateTime", "description": "首次下单时间"}
       },
-      "depends_on": {"nodes": ["source.shop_dw.raw.users", "model.shop_dw.stg_orders"]}
+      "depends_on": {"nodes": ["source.shop_dw.raw.users", "model.shop_dw.stg_orders", "model.shop_dw.country_seed"]}
     },
     "model.shop_dw.fct_orders_daily": {
       "resource_type": "model",
@@ -30,13 +31,14 @@
       "database": "shop",
       "schema": "default",
       "description": "订单日粒度事实表.",
+      "raw_code": "{{ config(materialized='incremental', unique_key='order_date_user_id') }}\n\nSELECT\n  toDate(o.created_at)         AS order_date,\n  o.user_id                    AS user_id,\n  countDistinct(o.id)          AS order_count,\n  sum(o.amount)                AS gmv\nFROM {{ ref('stg_orders') }} o\n{% if is_incremental() %}\nWHERE o.created_at > (SELECT max(order_date) FROM {{ this }})\n{% endif %}\nGROUP BY order_date, o.user_id\n",
       "columns": {
         "order_date": {"name": "order_date", "data_type": "Date", "description": "订单日期"},
         "user_id": {"name": "user_id", "data_type": "Int64", "description": "用户ID, PII"},
         "order_count": {"name": "order_count", "data_type": "Int64", "description": "订单数"},
         "gmv": {"name": "gmv", "data_type": "Decimal(18,2)", "description": "成交总额"}
       },
-      "depends_on": {"nodes": ["model.shop_dw.stg_orders", "model.shop_dw.dim_users"]}
+      "depends_on": {"nodes": ["model.shop_dw.stg_orders"]}
     },
     "model.shop_dw.stg_orders": {
       "resource_type": "model",
@@ -46,6 +48,7 @@
       "database": "shop",
       "schema": "staging",
       "description": "订单明细中间层 (来源: raw.events).",
+      "raw_code": "SELECT\n  id        AS order_id,\n  user_id   AS user_id,\n  amount    AS amount,\n  status    AS status\nFROM {{ source('raw', 'orders') }}\n",
       "columns": {
         "order_id": {"name": "order_id", "data_type": "Int64", "description": "订单ID"},
         "user_id": {"name": "user_id", "data_type": "Int64", "description": "用户ID"},
@@ -81,6 +84,7 @@
       "columns": {
         "id": {"name": "id", "data_type": "Int64"},
         "email": {"name": "email", "data_type": "String"},
+        "phone": {"name": "phone", "data_type": "String"},
         "created_at": {"name": "created_at", "data_type": "DateTime"}
       }
     },

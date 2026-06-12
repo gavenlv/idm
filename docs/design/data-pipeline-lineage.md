@@ -172,6 +172,17 @@ flowchart TB
 | `discover_clickhouse_assets` | v1 (已有) | 5 | B | 增强: 写 `profiled_at` / `row_count` / `size_bytes` |
 | `infer_table_description` | v1 (已有) | 1~6 | - | 增强: 输入增加 `gcs_object` / `flink_table` / `mex_io` 资产类型 |
 
+### 3.3 M2.x 新增 Skill (4 个 — 语义增强)
+
+| Skill | 版本 | 阶段 | 轨道 | 用途 |
+| --- | --- | --- | --- | --- |
+| `infer_column_descriptions` | v1 (新) | 1~6 | - | 推断列业务描述: 列名模式 + 数据类型 + 样本值 + PII 分类 → `column_asset.description` + `ai_suggestion` (待 review) |
+| `infer_lineage_descriptions` | v1 (新) | 1~6 | - | 生成血缘边的组件级自然语言描述: `transform_type` + `component` + `transform_subtype` + `sql_glimpse` → `table_lineage.description` / `column_lineage.description` |
+| `infer_column_lineage` | v1 (新) | 1~6 | A | 从 SQL / dbt / Flink Plan 推断列级血缘: 解析 `SELECT` / `INSERT INTO` / `ref()` / 表达式, 写 `column_lineage` (含 transform_expression) |
+| `lineage_to_column` | v1 (新) | 1~6 | - | 把"表级血缘"自动展开为"列级血缘": 同名列 + 命名约定 (e.g. `*_id` ↔ `user_id`) → 默认列映射, 不确定时调 LLM 兜底 |
+
+详见 [skills-design.md](./skills-design.md) 第四节 / [ai-driven-design.md §11](./ai-driven-design.md#11-列级血缘与智能描述推断-column-level-lineage--smart-description-inference--m2x) 统一权威文档。
+
 ---
 
 ## 4. 数据模型扩展
@@ -241,7 +252,21 @@ ALTER TABLE table_lineage ADD COLUMN pipeline_stage SMALLINT;
   -- 该边所处的 stage
 ```
 
----
+### 4.3 M2.x 新增: 列级血缘 + 语义描述 (Semantic Enrichment) — 已迁移
+
+> **⚠️ 本节内容 (M2.x 列级血缘 + 组件级血缘描述 + 6 阶段管道列级样例 + 资产描述字段) 已于 2026-06-12 迁移至统一权威文档:**
+>
+> 👉 **[ai-driven-design.md §11 列级血缘与智能描述推断](./ai-driven-design.md#11-列级血缘与智能描述推断-column-level-lineage--smart-description-inference--m2x)**
+>
+> 重点子节:
+> - **列级血缘 6 阶段管道样例** → §11A.3 (6 阶段管道列级血缘, 含 1/2/3/5/6 阶段典型 transform)
+> - **数据模型 / DDL** → §11A.4 (`CREATE TABLE column_lineage` + 索引)
+> - **组件级 description 样例** → §11C.1 / §11C.2 (airflow_task / flink_job / mex_model / superset_chart / ...)
+> - **6 阶段管道的 M2.x UI 视角** → §11E (`fct_orders_risk_daily` 详细描述)
+>
+> 留在本文的, 仅是 **6 阶段管道编排上下文** (本文件 §1~§3 端到端 skill / use case / fixture) 以及 **数据模型扩展 (§4.1 ~ §4.2)** 的事实, 这些与 M2.x 描述推断正交, 不重复。
+
+
 
 ## 5. Use Case YAML 模板 (真实 6 阶段管道)
 
@@ -644,6 +669,33 @@ flowchart TB
   - **血缘下游**: A9 (Superset dashboard)
   - **质量监控**: A8 的 volume / null / PII 异常, 自动 **反向追溯** 到具体是 A1 的 schema 变了 / A4 的 model-input 行数为 0 / A5 的 MEX 模型挂了
 
+### 8.1 M2.x 语义增强后的 UI 视角
+
+> **每条血缘边 / 每张表 / 每列都有"人话"**, LLM 零样本可用。
+
+```mermaid
+flowchart TB
+  subgraph A8[clickhouse://shop.fct_orders_risk_daily]
+    DESC[description: 订单风险事实表 (天粒度), 一行 = 一个用户 × 一天, 包含日风险分汇总<br/>source=ai_inferred, confidence=0.92]
+    TIER[tier: critical<br/>owner: alice@example.com]
+    COL[列:<br/>· order_id (UInt64, PK) — 订单编号<br/>· user_id (UInt64, FK) — 用户 ID, 关联 dim_users<br/>· risk_score (Float32) — 风险评分 (0-1), 由 MEX 模型 risk_score_v2 派生<br/>· risk_level (String) — 风险等级 (high/medium/low), 由 risk_score > 0.8 派生<br/>· day (Date) — 统计日期]
+  end
+
+  A6[gcs://model-output/orders/*.parquet] -->|"由 Flink Job flink_load_to_ch 聚合写入<br/>component=flink_job, transform=aggregation"| A8
+  A5[mex://orders_risk_model] -->|"MEX 黑盒模型 risk_score_v2 派生 risk_score<br/>component=mex_model, transform=expression"| A6
+  A8 -->|"Superset chart risk_trend 查询 fct_orders_risk_daily.risk_score<br/>component=superset_chart"| A9[superset://dashboard/orders_risk]
+```
+
+**M2.x UI 关键能力**:
+
+| 视图 | 展示 | 数据源 |
+| --- | --- | --- |
+| **资产详情页** | description + source + confidence + rationale + 编辑按钮 (人工覆写) | `table_asset.description` + `ai_suggestion` |
+| **列详情页** (新) | 描述 + 样本值 + PII 分类 + 列级血缘 (上+下游) | `column_asset` + `column_lineage` |
+| **血缘图** | 边的中间是组件级 description (e.g. "由 Flink SQL 转换生成"), 鼠标 hover 显示 transform_expression | `table_lineage.description` + `column_lineage.description` |
+| **ChatBI 提问** | 用户问 "过去 7 天高风险订单有多少?" → LLM 读 description 自动生成 SQL | LLM 读 `description` 向量 |
+| **Impact 分析** | 改 `user_id` 类型 → 列级血缘反向找到所有受影响的 chart (精确到列) | `column_lineage` |
+
 ---
 
 ## 9. 与 M1~M5 的关系
@@ -652,8 +704,9 @@ flowchart TB
 | --- | --- | --- |
 | M1 Schema Agent | ✅ `discover_clickhouse_assets` | ➕ `discover_gcs_assets` (新 MCP: gcs) |
 | M1 Lineage Agent | ✅ `parse_dbt_manifest`, `extract_sql_lineage` | ➕ `parse_flink_job` (GitHub Flink SQL), `parse_mex_io` (io.yaml), `analyze_data_pipeline` (端到端) |
-| M1 Doc Agent | ✅ `infer_table_description` | ➕ 适配 gcs_object / mex_io 资产类型 |
+| M1 Doc Agent | ✅ `infer_table_description` | ➕ 适配 gcs_object / mex_io 资产类型, ➕ **`infer_column_descriptions` (M2.x)** 列级推断, ➕ **`infer_lineage_descriptions` (M2.x)** 组件级描述 |
 | M1 Quality Agent | ✅ `detect_anomalies` | ➕ 跨源异常 (CH 异常 → 追溯到 GCS schema 变化 / MEX 输出空) |
+| M2 Lineage (语义) | (新) | ➕ **`column_lineage` 表 (M2.x)** + **`infer_column_lineage` / `lineage_to_column` skill** (列级血缘) |
 | M4 Insight Agent | ✅ `compose_insight` | ➕ 跨源复合事件 (Airflow 失败 + MEX 异常 + CH 数据缺失) |
 | M5 MCP Server | ✅ idm-self | ➕ `gcs` / `flink` / `superset_db` / `airflow_db` (4 个新 MCP) |
 

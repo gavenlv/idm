@@ -29,13 +29,25 @@ class TableLineage(Base, UUIDMixin, TimestampMixin):
     upstream_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("table_assets.id", ondelete="CASCADE"), index=True, nullable=False)
     downstream_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("table_assets.id", ondelete="CASCADE"), index=True, nullable=False)
     transform_type: Mapped[str] = mapped_column(String(32), default="copy", nullable=False)
+    transform_subtype: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # copy / aggregation / expression / cast / filter / projection / dbt_model / airflow_task / superset_chart / sql
+    transform_expression: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    # 源表达式/转换细节 (e.g. "UPPER(name)", "SUM(amount) GROUP BY day")
     job_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    component: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # airflow_task / flink_job / dbt_model / mex_model / sql / ai_inferred / manual
     sql: Mapped[str | None] = mapped_column(String(8192), nullable=True)
     confidence: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     source: Mapped[str] = mapped_column(String(32), default="ai_inferred", nullable=False)
     # dbt_manifest / airflow_dag / superset_export / sqlglot / ai_inferred
     # 真实管道: flink_sql / airflow_task / mex_inference / gcs_copy / superset_query / dbt_ref
-    transform_subtype: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+
+    # === 组件级自然语言描述 (M2.x 新增) ===
+    description: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    description_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # manual / ai_inferred / imported
+    description_rationale: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+
     # 6 阶段管道标号: 1|2|3|4|5|6 (强约束; 用于 6 阶段真实管道用例)
     pipeline_stage: Mapped[int | None] = mapped_column(SmallInteger, nullable=True, index=True)
     extra: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)

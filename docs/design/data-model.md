@@ -64,6 +64,10 @@ erDiagram
     table_asset ||--o{ column_asset : "has"
     table_asset ||--o{ table_lineage : "downstream"
     table_asset ||--o{ table_lineage : "upstream"
+    table_asset ||--o{ column_lineage : "downstream"
+    table_asset ||--o{ column_lineage : "upstream"
+    column_asset ||--o{ column_lineage : "downstream"
+    column_asset ||--o{ column_lineage : "upstream"
     table_asset ||--o{ asset_tag : "tagged"
     tag }o--o{ asset_tag : "applied to"
     table_asset ||--o{ asset_owner : "owned by"
@@ -75,6 +79,7 @@ erDiagram
     quality_rule ||--o{ quality_result : "asserts"
     table_asset ||--o{ ai_suggestion : "has suggestion"
     user ||--o{ ai_suggestion : "review"
+    pipeline ||--o{ pipeline_run : "runs"
     audit_log }o--|| user : "actor"
 
     service {
@@ -101,6 +106,9 @@ erDiagram
         text schema
         text name
         text description
+        text description_source "manual|ai_inferred|imported"
+        text description_rationale
+        timestamptz described_at
         text fts "tsvector"
         vector description_vec "pgvector"
         text tier "critical|important|normal"
@@ -115,8 +123,14 @@ erDiagram
         text data_type
         bool nullable
         text description
+        text description_source "manual|ai_inferred|imported"
+        text description_rationale
         vector description_vec
         text pii_class "none|email|phone|..."
+        text pii_source "manual|ai_inferred|regex|pattern"
+        jsonb sample_values
+        float null_ratio
+        int distinct_count
     }
     tag {
         uuid id PK
@@ -149,10 +163,31 @@ erDiagram
     table_lineage {
         uuid upstream_id FK
         uuid downstream_id FK
-        text transform_type "sql|dbt|airflow|implicit"
+        text transform_type "sql|dbt|airflow|implicit|column_projection"
         text sql_fragment
         text job_id
+        text component "airflow_task|flink_job|dbt_model|mex_model|superset_chart|sql"
+        text description "组件级自然语言描述 (M2.x 新增)"
+        text description_source "manual|ai_inferred|imported"
         float confidence
+        jsonb column_count "upstream→downstream 列数, 用于快速浏览"
+    }
+    column_lineage {
+        uuid id PK
+        uuid upstream_table_id FK
+        uuid downstream_table_id FK
+        uuid upstream_column_id FK
+        uuid downstream_column_id FK
+        text transform_type "direct|rename|cast|aggregation|expression|derivation|passthrough"
+        text transform_expression "源表达式 (e.g. UPPER(name), SUM(amount), orders.user_id)"
+        text job_id
+        text component "airflow_task|flink_job|dbt_model|mex_model|sql|ai_inferred"
+        text description "列级自然语言描述 (M2.x 新增)"
+        text description_source "manual|ai_inferred|imported"
+        float confidence "0-1, 来自 SQL parser / dbt ref / LLM"
+        text source "sqlglot|dbt_ref|flink_plan|ai_inferred|manual"
+        int pipeline_stage "1..6, 6 阶段管道标号"
+        jsonb extra
     }
     quality_rule {
         uuid id PK
@@ -214,6 +249,9 @@ CREATE TABLE table_asset (
   schema        TEXT NOT NULL,
   name          TEXT NOT NULL,
   description   TEXT,
+  description_source TEXT,  -- manual / ai_inferred / imported
+  description_rationale TEXT,  -- 为什么这么描述 (LLM 输出 / 用户备注)
+  described_at  TIMESTAMPTZ,    -- 最近一次描述时间
   tier          TEXT NOT NULL DEFAULT 'normal',
   status        TEXT NOT NULL DEFAULT 'active',
   description_vec vector(1024),         -- text-embedding-3 / bge-large
@@ -234,11 +272,19 @@ CREATE TABLE column_asset (
   data_type     TEXT NOT NULL,
   nullable      BOOLEAN NOT NULL DEFAULT true,
   description   TEXT,
-  pii_class     TEXT NOT NULL DEFAULT 'none',
+  description_source TEXT,  -- manual / ai_inferred / imported
+  description_rationale TEXT,
   description_vec vector(1024),
+  pii_class     TEXT NOT NULL DEFAULT 'none',
+  pii_source    TEXT,
   ordinal       INT NOT NULL,
+  sample_values JSONB NOT NULL DEFAULT '[]'::jsonb,
+  null_ratio    REAL NOT NULL DEFAULT 0.0,
+  distinct_count INT,
   UNIQUE(table_id, name)
 );
+CREATE INDEX idx_column_asset_descrip_vec ON column_asset USING hnsw (description_vec vector_cosine_ops);
+CREATE INDEX idx_column_asset_table ON column_asset(table_id);
 
 CREATE TABLE table_lineage (
   upstream_id     UUID NOT NULL REFERENCES table_asset(id) ON DELETE CASCADE,
@@ -246,12 +292,46 @@ CREATE TABLE table_lineage (
   transform_type  TEXT NOT NULL,
   sql_fragment    TEXT,
   job_id          TEXT,
+  component       TEXT,            -- airflow_task | flink_job | dbt_model | mex_model | superset_chart | sql | ai_inferred
+  description     TEXT,            -- 组件级自然语言描述 (M2.x 新增, e.g. "由 Airflow etl_orders_daily 复制")
+  description_source TEXT,         -- manual | ai_inferred | imported
   confidence      REAL NOT NULL DEFAULT 1.0,
+  column_count    JSONB,           -- {upstream: 12, downstream: 18, mapped: 11} 用于快速浏览
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (upstream_id, downstream_id, transform_type, job_id)
 );
 CREATE INDEX idx_lineage_down ON table_lineage(downstream_id);
 CREATE INDEX idx_lineage_up   ON table_lineage(upstream_id);
+
+-- === M2.x 新增: 列级血缘 (Column-Level Lineage) ===
+CREATE TABLE column_lineage (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  upstream_table_id     UUID NOT NULL REFERENCES table_asset(id) ON DELETE CASCADE,
+  downstream_table_id   UUID NOT NULL REFERENCES table_asset(id) ON DELETE CASCADE,
+  upstream_column_id    UUID NOT NULL REFERENCES column_asset(id) ON DELETE CASCADE,
+  downstream_column_id  UUID NOT NULL REFERENCES column_asset(id) ON DELETE CASCADE,
+  transform_type        TEXT NOT NULL,
+  -- direct / rename / cast / aggregation / expression / derivation / passthrough
+  transform_expression  TEXT,
+  -- 源表达式原文, e.g. "UPPER(name)", "SUM(amount)", "orders.user_id"
+  job_id                TEXT,
+  component             TEXT,
+  -- airflow_task | flink_job | dbt_model | mex_model | sql | ai_inferred
+  description           TEXT,            -- 列级自然语言描述 (M2.x 新增)
+  description_source    TEXT,            -- manual | ai_inferred | imported
+  confidence            REAL NOT NULL DEFAULT 1.0,
+  source                TEXT NOT NULL DEFAULT 'sqlglot',
+  -- sqlglot / dbt_ref / flink_plan / ai_inferred / manual
+  pipeline_stage        SMALLINT,        -- 1..6, 6 阶段管道标号
+  extra                 JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (upstream_column_id, downstream_column_id, transform_type, job_id)
+);
+CREATE INDEX idx_col_lineage_down ON column_lineage(downstream_column_id);
+CREATE INDEX idx_col_lineage_up   ON column_lineage(upstream_column_id);
+CREATE INDEX idx_col_lineage_down_table ON column_lineage(downstream_table_id);
+CREATE INDEX idx_col_lineage_up_table   ON column_lineage(upstream_table_id);
 
 CREATE TABLE ai_suggestion (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -487,14 +567,57 @@ ORDER BY created_at DESC
 LIMIT 50;
 ```
 
+### 6.5 列级血缘查询 (M2.x)
+
+```sql
+-- 某列的所有下游 (impact analysis)
+SELECT cl.downstream_column_id, ca.name, cl.transform_expression, cl.description
+FROM column_lineage cl
+JOIN column_asset ca ON ca.id = cl.downstream_column_id
+WHERE cl.upstream_column_id = $1
+ORDER BY cl.confidence DESC;
+
+-- 某列的所有上游 (root cause)
+SELECT cl.upstream_column_id, ca.name, cl.transform_expression
+FROM column_lineage cl
+JOIN column_asset ca ON ca.id = cl.upstream_column_id
+WHERE cl.downstream_column_id = $1
+ORDER BY cl.confidence DESC;
+
+-- 列级血缘覆盖率 (mappable / total)
+SELECT
+  dt.fqn AS downstream_fqn,
+  COUNT(DISTINCT cl.downstream_column_id) AS mapped,
+  (SELECT COUNT(*) FROM column_asset WHERE table_id = dt.id) AS total
+FROM table_asset dt
+LEFT JOIN column_lineage cl ON cl.downstream_table_id = dt.id
+GROUP BY dt.id, dt.fqn;
+```
+
 ---
 
-## 7. 演进路线
+## 7. 语义增强子层 (M2.x) — 已迁移
+
+> **⚠️ 本节内容 (M2.x 语义增强, 含列级血缘 / 表/列/边 描述推断) 已于 2026-06-12 迁移至统一权威文档:**
+>
+> 👉 **[ai-driven-design.md §11 列级血缘与智能描述推断](./ai-driven-design.md#11-列级血缘与智能描述推断-column-level-lineage--smart-description-inference--m2x)**
+>
+> 包含 §11A 列级血缘 / §11B 智能描述推断 / §11C 组件级血缘描述 / §11D AI in the Loop 铁律 / §11E LLM 视角对比 / §11F 评估指标 / §11G API 速查 / §11H 5 大原则 / §11I 已落地状态。
+>
+> 留在本文的, 仅是**数据模型 (ER / DDL / 索引)** 的事实:
+>
+> - 列级血缘表结构 → 见 [§2.1](#21-全景-er-图) `column_lineage` 实体 + [§2.2](#22-关键-ddl-节选) `CREATE TABLE column_lineage (...)` DDL
+> - 描述字段 (`description` / `description_source` / `description_rationale`) → 见 [§2.1](#21-全景-er-图) `table_asset` / `column_asset` / `table_lineage` / `column_lineage` 实体
+> - 列级血缘查询样例 → 见 [§6.5](#65-列级血缘查询-m2x)
+
+## 8. 演进路线
 
 | 阶段 | 模型 | 存储 |
 | --- | --- | --- |
 | **M1 (Q1)** | 资产 / 列 / 标签 / Owner | PG 单实例 |
 | **M2 (Q2)** | + 知识图谱 (AGE) | PG + AGE |
+| **M2.1 (Q2+)** | + 描述语义层 (表/列/血缘自然语言描述) | PG + pgvector (description_vec) |
+| **M2.2 (Q2+)** | + 列级血缘 (column_lineage 表 + 推断) | PG + 图遍历 |
 | **M3 (Q3)** | + 向量检索 (pgvector) | PG + pgvector |
 | **M4 (Q4)** | + 多租户分库 | CloudSQL Sharding |
 | **M5 (Q5+)** | 冷数据归档 (Iceberg on GCS) | Iceberg + BigQuery external |

@@ -114,7 +114,106 @@ export const AssetsApi = {
         edges: Array<any>;
       }>(`/v1/assets/${id}/lineage`, { params: { depth } })
       .then((r) => r.data),
+  columnLineage: (id: string, columnName?: string) =>
+    api
+      .get<{
+        center_table_id: string;
+        center_column_id: string | null;
+        upstream: ColumnLineageEdge[];
+        downstream: ColumnLineageEdge[];
+        total: number;
+      }>(
+        `/v1/lineage/column/table/${id}${columnName ? `/${encodeURIComponent(columnName)}` : ""}`,
+      )
+      .then((r) => r.data),
+  columnLineageStats: () =>
+    api
+      .get<{
+        n_edges: number;
+        n_transform_types: Record<string, number>;
+        n_components: Record<string, number>;
+        coverage: Record<string, number>;
+      }>("/v1/lineage/column/stats")
+      .then((r) => r.data),
+  // M2.5+ Coverage matrix
+  columnLineageCoverage: (params?: { only_with_table_lineage?: boolean }) =>
+    api
+      .get<{
+        total_tables: number;
+        total_columns: number;
+        total_columns_with_lineage: number;
+        overall_coverage_pct: number;
+        tables: Array<{
+          table_id: string;
+          table_fqn: string;
+          asset_type: string;
+          tier: string;
+          n_columns: number;
+          n_columns_with_lineage: number;
+          coverage_pct: number;
+          has_table_lineage: boolean;
+          n_table_lineage_edges: number;
+          columns: Array<{
+            column_id: string;
+            column_name: string;
+            data_type: string;
+            has_upstream: boolean;
+            has_downstream: boolean;
+            n_upstream_edges: number;
+            n_downstream_edges: number;
+          }>;
+        }>;
+      }>("/v1/lineage/column/coverage", { params })
+      .then((r) => r.data),
+  // M2.5+ Bulk infer
+  bulkInferColumnLineage: (payload: {
+    table_ids?: string[];
+    include_table_lineage_inference?: boolean;
+    include_column_lineage_inference?: boolean;
+    include_lineage_to_column?: boolean;
+    min_confidence?: number;
+    dry_run?: boolean;
+  }) =>
+    api
+      .post<{
+        ok: boolean;
+        started_at: string;
+        finished_at: string;
+        duration_ms: number;
+        tables_processed: number;
+        tables_skipped: number;
+        table_lineage_edges_created: number;
+        column_lineage_edges_created: number;
+        errors: string[];
+        dry_run: boolean;
+        summary: Record<string, unknown>;
+      }>("/v1/lineage/column/infer-all", payload)
+      .then((r) => r.data),
 };
+
+// === Column Lineage (M2.x) ===
+export interface ColumnLineageEdge {
+  id: string;
+  upstream_table_id: string;
+  downstream_table_id: string;
+  upstream_column_id: string;
+  downstream_column_id: string;
+  transform_type: string;
+  transform_expression: string | null;
+  job_id: string | null;
+  component: string | null;
+  description: string | null;
+  description_source: string | null;
+  confidence: number;
+  source: string;
+  pipeline_stage: number | null;
+  upstream_table_fqn: string | null;
+  downstream_table_fqn: string | null;
+  upstream_column_name: string | null;
+  downstream_column_name: string | null;
+  upstream_column_type: string | null;
+  downstream_column_type: string | null;
+}
 
 export const ServicesApi = {
   list: () => api.get<Service[]>("/v1/services").then((r) => r.data),

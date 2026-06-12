@@ -14,6 +14,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { AssetsPage } from "./pages/AssetsPage";
 import { HealthPage } from "./pages/HealthPage";
 import { LineagePage } from "./pages/LineagePage";
+import { ColumnLineagePage } from "./pages/ColumnLineagePage";
 import { QualityPage } from "./pages/QualityPage";
 import { SkillsPage } from "./pages/SkillsPage";
 import { SuggestionsPage } from "./pages/SuggestionsPage";
@@ -42,6 +43,7 @@ const NAV: NavGroup[] = [
     items: [
       { to: "/", key: "assets", label: "Assets", icon: "▣" },
       { to: "/lineage", key: "lineage", label: "Lineage", icon: "⇄" },
+      { to: "/lineage/column", key: "lineage_column", label: "Column Lineage", icon: "⇶" },
       { to: "/owners", key: "owners", label: "Owners", icon: "◉" },
       { to: "/tags", key: "tags", label: "Tags", icon: "#" },
       { to: "/glossary", key: "glossary", label: "Glossary", icon: "§" },
@@ -68,7 +70,8 @@ const NAV: NavGroup[] = [
 const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   "/dashboard": { title: "Home", subtitle: "Overview of assets, AI suggestions, owners and system health" },
   "/": { title: "Assets", subtitle: "All data assets across services" },
-  "/lineage": { title: "Lineage", subtitle: "Upstream and downstream dependencies" },
+  "/lineage": { title: "Lineage", subtitle: "Upstream and downstream dependencies (table + column level)" },
+  "/lineage/column": { title: "Column Lineage", subtitle: "M2.x: column-level upstream & downstream with transform expressions" },
   "/owners": { title: "Owners", subtitle: "Suggested owners per asset" },
   "/tags": { title: "Tags", subtitle: "Business tag dictionary + asset binding" },
   "/glossary": { title: "Glossary", subtitle: "Business term dictionary" },
@@ -196,6 +199,10 @@ export default function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/" element={<AssetsPage />} />
           <Route path="/lineage" element={<LineagePage />} />
+          <Route path="/lineage/column" element={<ColumnLineagePage />} />
+          <Route path="/lineage/column/coverage" element={<ColumnLineagePage />} />
+          <Route path="/lineage/column/:tableId" element={<ColumnLineagePage />} />
+          <Route path="/lineage/column/:tableId/:columnName" element={<ColumnLineagePage />} />
           <Route path="/owners" element={<OwnersPage />} />
           <Route path="/tags" element={<TagsPage />} />
           <Route path="/glossary" element={<GlossaryPage />} />

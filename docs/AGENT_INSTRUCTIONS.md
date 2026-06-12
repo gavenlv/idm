@@ -882,6 +882,130 @@ curl -sf -X POST http://localhost:8080/api/v1/scan/asset \
 
 ---
 
+## 16.7 语义增强 + 列级血缘子系统 (Semantic Enrichment & Column-Level Lineage, M2.x)
+
+> **目标**: 让"数据资产 + 血缘"在 LLM 视角下 **可解释** — 每张表 / 每列 / 每条血缘边都有自然语言描述; 同时把血缘从"表级"扩展到"列级"。
+>
+> **⚠️ 本节是 AI Agent 的"宪法摘要", 详细设计已于 2026-06-12 迁移至统一权威文档:**
+>
+> 👉 **[ai-driven-design.md §11 列级血缘与智能描述推断](./design/ai-driven-design.md#11-列级血缘与智能描述推断-column-level-lineage--smart-description-inference--m2x)** (含 §11A 列级血缘 / §11B 智能描述推断 / §11C 组件级血缘描述 / §11D 铁律 / §11E LLM 视角 / §11F 评估 / §11G API / §11H 5 大原则 / §11I 落地状态)
+>
+> 同时废除以下旧链接:
+> - ~~[data-model.md §7](./design/data-model.md#7-语义增强子层-m2x-新增--semantic-enrichment)~~ → 已替换为跳转占位
+> - ~~[data-pipeline-lineage.md §4.3](./design/data-pipeline-lineage.md#43-m2x-新增-列级血缘--语义描述-semantic-enrichment)~~ → 已替换为跳转占位
+> - ~~[skills-design.md §11.1](./design/skills-design.md#111-m2x-新增-skill-详解-语义增强--列级血缘)~~ → 已替换为跳转占位
+
+### 16.7.1 三大能力 + 对应 Skill (速查)
+
+| 能力 | Skill (M2.x) | 触发 | 详细设计 |
+| --- | --- | --- | --- |
+| **表描述推断** | `infer_table_description` (M1.5, 增强) | `POST /api/v1/skills/run` `{"skill":"infer_table_description"}` | [ai-driven-design.md §11B.1](./design/ai-driven-design.md#11b1-表描述推断-infer_table_description-增强) |
+| **列描述推断** | `infer_column_descriptions` (新) | `POST /api/v1/skills/run` `{"skill":"infer_column_descriptions"}` | [ai-driven-design.md §11B.2](./design/ai-driven-design.md#11b2-列描述推断-infer_column_descriptions--m2x-核心新增) |
+| **列级血缘** | `infer_column_lineage` (新) + `lineage_to_column` (新) | `POST /api/v1/skills/run` `{"skill":"infer_column_lineage"}` | [ai-driven-design.md §11A.6](./design/ai-driven-design.md#11a6-skills-列级血缘-2-个) |
+| **组件级血缘描述** | `infer_lineage_descriptions` (新) | `POST /api/v1/skills/run` `{"skill":"infer_lineage_descriptions"}` | [ai-driven-design.md §11C.3](./design/ai-driven-design.md#11c3-skill-infer_lineage_descriptions) |
+
+### 16.7.2 推断策略 (三层信号 + 权重)
+
+| 层级 | 占比 | 来源 | 用途 |
+| --- | --- | --- | --- |
+| **规则层 (零 LLM)** | 70% | 列名模式 / 数据类型 / 样本值 / PII 分类 / 组件模板 | 命中即用, 高置信度 (≥0.85) |
+| **LLM 兜底层** | 25% | DeepSeek V4 `cheap` profile | 规则未命中, LLM 补全 |
+| **人工审核层** | 5% | `ai_suggestion` 待审 | AI 推断的所有结果都先入 suggestion, 人工一键 confirm |
+
+**信号源四要素** (按权重):
+1. **metadata (30%)** — 表名/列名/数据类型/字段; `fct_*_daily` / `*_email` / `Decimal(18,2)` 等强信号
+2. **samples (30%)** — 列 sample N 个值; ISO 3166-1 / 11 位手机号 / 邮箱正则等
+3. **lineage + component (20%)** — `airflow_task` / `dbt_model` / `mex_model` 模板
+4. **LLM 兜底 (20%)** — 上面都未命中 → cheap profile
+
+### 16.7.3 铁律 (M2.x 7 条 — **不能违反**)
+
+1. **description 双写**: 所有 AI 推断都先写 `ai_suggestion.pending`, 人工确认后才写 `table_asset.description` / `column_asset.description` / `table_lineage.description`。**不允许** AI 直接覆盖生产字段。
+2. **PII 脱敏**: description 只描述"类型" (e.g. "包含 11 位手机号"), **绝不**写真实 PII 值 (e.g. 真实手机号 / 身份证号)。
+3. **置信度阈值**: `confidence >= 0.7` 自动写 + suggestion; `< 0.7` 只入 suggestion (不自动写)。
+4. **列级血缘来源**: 优先用 SQL parser (sqlglot) 静态推断 (100% 准确), **不**无脑调 LLM。
+5. **覆盖源追溯**: 每个 description 必须带 `description_source` (`manual` / `ai_inferred` / `imported`), `description_rationale` (为什么这么推断)。
+6. **不动现有 6 阶段**: 语义增强是 **异步 + 按需** 的 skill, 不阻塞 `analyze_data_pipeline` 6 阶段管道。
+7. **人工可覆写**: UI 提供"编辑 description"按钮, 人工覆写后 `description_source='manual'`, AI 不再覆盖。
+
+### 16.7.4 数据模型扩展 (M2.x) — **本节是事实, 不迁移**
+
+- **新表** `column_lineage` (列级血缘) — DDL 见 [data-model.md §2.2](./design/data-model.md#22-关键-ddl-节选)
+- **扩展字段**:
+  - `table_asset` 加 `description_source`, `description_rationale`, `described_at`
+  - `column_asset` 加 `description_source`, `description_rationale`
+  - `table_lineage` 加 `component`, `description`, `description_source`, `column_count`
+
+### 16.7.5 评估指标 (M2.x Eval)
+
+| 维度 | 指标 | 目标 |
+| --- | --- | --- |
+| **覆盖率** | (有 description 的资产数) / (总资产数) | ≥ 80% |
+| **准确率** | 抽样 review, description 是否被接受 | ≥ 75% |
+| **时效** | 从 `discover_*` 写入到 `description` 入库 | < 5 min |
+| **成本** | LLM 调用次数 / 资产 | ≤ 1 (cheap profile) |
+| **PII 安全** | description 不含真实 PII 值 | 100% |
+| **列级血缘覆盖率** | mapped_columns / total_columns | ≥ 60% |
+
+**当前状态 (M2.x — 2026-06-11 验证)**:
+- 数据模型: ✅ 已加 (data-model.md §2)
+- 4 个 skill: ✅ **已实现** ([infer_column_descriptions.py](./apps/api/src/idm_api/skills/builtin/infer_column_descriptions.py) / [infer_lineage_descriptions.py](./apps/api/src/idm_api/skills/builtin/infer_lineage_descriptions.py) / [infer_column_lineage.py](./apps/api/src/idm_api/skills/builtin/infer_column_lineage.py) / [lineage_to_column.py](./apps/api/src/idm_api/skills/builtin/lineage_to_column.py))
+- 端到端验证: ✅ 9 columns inferred / 10 column edges / 2 lineage descriptions (见 [ai-driven-design.md §11I.3](./design/ai-driven-design.md#11i3-端到端验证-curl-命令--结果))
+- UI: ✅ 列详情页 + ReactFlow 血缘图 (见 [ai-driven-design.md §11A.7](./design/ai-driven-design.md#11a7-api--ui))
+
+---
+
+## 16.8 OpenLineage 兼容与互操作 (M2.5 — 2026-06-12 新增)
+
+> **目标**: IDM 内部用 LLM 增强 (差异化), 对外能 emit / ingest OpenLineage 兼容事件 (互操作)。
+>
+> **权威文档**: 👉 **[openlineage-alignment.md](./design/openlineage-alignment.md)** (含概念对齐表 / DDL / Skill / API 端点 / 互操作场景 / 评估指标 / 落地状态)
+
+### 16.8.1 为什么对齐 OpenLineage?
+
+- **OpenLineage 是 Linux Foundation 事实标准** (Apache Airflow / Spark / dbt / Marquez 全支持)
+- **数据模型对齐, 推断层保持差异化**: 我们兼容 OL schema, 但 LLM 增强是护城河 (业界都没有)
+- **互操作**: 可推 Marquez / DataHub; 可收 Airflow OL plugin
+
+### 16.8.2 关键变更 (M2.5 — 不破坏 M2.x)
+
+| 变更 | 类型 | 详情 |
+| --- | --- | --- |
+| 新表 `lineage_event` | append-only 审计 | OpenLineage RunEvent 完整 JSON + producer + job/run 标识 |
+| `column_lineage.transformations JSONB` | 新增字段 | 对齐 OL `ColumnLineageDatasetFacet.fields.<col>.transformations` |
+| `table_assets.ol_namespace` | 新增字段 | 对齐 OL `Dataset.namespace` (fallback: `service://database`) |
+
+### 16.8.3 关键能力 (速查)
+
+| 能力 | Skill / API | 触发 |
+| --- | --- | --- |
+| **emit OL 事件** | `emit_openlineage_event` skill (M2.5 新) | `POST /api/v1/skills/run` `{"skill":"emit_openlineage_event", "inputs": {"pipeline_run_id": "..."}}` |
+| **导出 OL 事件** | `GET /api/v1/lineage/openlineage/export/{pipeline_run_id}` | HTTP |
+| **列出 OL 事件** | `GET /api/v1/lineage/openlineage/events` | HTTP (支持 job/run 过滤) |
+| **接收外部 OL 事件** | `POST /api/v1/lineage/openlineage/ingest` | HTTP (Marquez / Airflow OL plugin 推过来) |
+
+### 16.8.4 铁律 (M2.5 OpenLineage — 6 条)
+
+1. **schemaURL 锁死**: 写 `https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/RunEvent`, 1.0+ spec 稳定
+2. **producer 标识 IDM**: `idm/0.4.0 (idm-skill/emit_openlineage_event)` — 让 Marquez / DataHub 能溯源
+3. **transformations 不丢信息**: 列级血缘所有信息必须落入 `transformations` array (含 expression / subtype / description)
+4. **不破坏 M2.x**: M2.5 仅新增字段/表, **不改**任何 M2.x 字段名/语义
+5. **ingest 不修改 IDM 内部表**: `/ingest` 端点只写 `lineage_event` 审计表; 反向同步到 `table_lineage` / `column_lineage` 是 M2.6 规划
+6. **PII 不出 OL 事件**: `transformations` 的 `description` 字段必须脱敏 (同 §16.7.3 铁律 2)
+
+### 16.8.5 已落地状态 (2026-06-12)
+
+- [x] **数据模型**: 迁移 [migrations/versions/0006_openlineage_alignment.py](./migrations/versions/0006_openlineage_alignment.py) (DDL + 索引)
+- [x] **ORM 实体**: [lineage_event.py](./packages/kg/src/idm_kg/models/lineage_event.py) / [column_lineage.py](./packages/kg/src/idm_kg/models/column_lineage.py) / [table_asset.py](./packages/kg/src/idm_kg/models/table_asset.py)
+- [x] **Skill**: [emit_openlineage_event.py](./apps/api/src/idm_api/skills/builtin/emit_openlineage_event.py) v1
+- [x] **Router**: [openlineage.py](./apps/api/src/idm_api/routers/openlineage.py) (4 个端点: event / events / export / ingest)
+- [x] **Pydantic**: `OpenLineageEventRead` (schemas.py)
+- [x] **互操作**: 可推 Marquez / 可收 Airflow OL plugin
+- [ ] **IDM-side 反向映射** (OL ingest → table_lineage / column_lineage): M2.6 规划
+- [ ] **DataHub GMS 集成**: M2.6 规划
+
+---
+
 ## 17. 配套阅读 (按重要性)
 
 ### 17.1 必读 (5 分钟内看完)
