@@ -1,4 +1,4 @@
-﻿# IDM — Skills 体系设计
+# IDM — Skills 体系设计
 
 > Skills 是 IDM 的**执行原子**
 > Agent 用 Skills 组合业务，LLM 用 Skills 输出稳定结果
@@ -484,12 +484,19 @@ flowchart LR
 | --- | --- | --- | --- | --- |
 | `discover_clickhouse_assets` | schema | host, db | assets[] | clickhouse |
 | `discover_postgres_assets` | schema | host, db | assets[] | postgres |
+| `discover_gcs_assets` (M1.5) | schema | bucket, prefix | assets[] | gcs |
 | `parse_dbt_manifest` | lineage | repo / path | models[], lineage[] | file / github |
 | `parse_airflow_dag` | lineage | dag_id | tasks[], deps[] | airflow / github |
+| `parse_flink_job` (M1.5) | lineage | flink_sql | sources[], sinks[], column_lineage[] | file / github |
+| `parse_mex_io` (M1.5) | lineage | io.yaml | mex_model, io_fqns[], lineage[] | file / github |
 | `parse_superset_export` | lineage | path | dashboards[], charts[], lineage[] | file |
 | `extract_sql_lineage` | lineage | sql | upstream/downstream | local (sqlglot) |
+| **`infer_column_lineage` (M2.x 新增)** | **lineage (列级)** | use_case / table_pair | `column_lineage[]` | local (sqlglot) + llm 兜底 |
+| **`lineage_to_column` (M2.x 新增)** | **lineage (列级)** | table_lineage edge | `column_lineage[]` (默认映射) | local (列名匹配) + llm |
 | `infer_pii_columns` | enrichment | assets | pii_class per column | clickhouse + llm |
 | `infer_table_description` | enrichment | assets | description per table | llm |
+| **`infer_column_descriptions` (M2.x 新增)** | **enrichment (列)** | table_ids[] | description per column | rules (70%) + llm (30%) |
+| **`infer_lineage_descriptions` (M2.x 新增)** | **enrichment (血缘)** | lineage_id / table_pair | description per lineage edge | rules (组件模板) + llm |
 | `infer_owners` | enrichment | assets | owner suggestions | github + llm |
 | `enrich_glossary` | enrichment | assets | glossary links | notion + llm |
 | `detect_anomalies` | quality | asset_fqn, window | anomalies[] | clickhouse + local |
@@ -498,6 +505,35 @@ flowchart LR
 | `resolve_entity` | dedup | candidates | merged entity | local + llm |
 | `classify_classification` | governance | assets | classification | llm |
 | `chatbi_nl2sql` | query | question, schema | sql, result | clickhouse |
+| `analyze_data_pipeline` (M1.5 端到端编排) | orchestration | use_case YAML | 6 阶段结果 + DAG | 调以上所有 skill |
+
+### 11.1 M2.x 新增 Skill 详解 (语义增强 / 列级血缘) — 已迁移
+
+> **⚠️ 本节内容 (`infer_column_descriptions` / `infer_lineage_descriptions` / `infer_column_lineage` / `lineage_to_column` 4 个 M2.x 新增 Skill 的输入/输出/规则/Prompt/核心代码) 已于 2026-06-12 迁移至统一权威文档:**
+>
+> 👉 **[ai-driven-design.md §11 列级血缘与智能描述推断](./ai-driven-design.md#11-列级血缘与智能描述推断-column-level-lineage--smart-description-inference--m2x)**
+>
+> 重点子节 (按 skill 拆分):
+> - **`infer_column_descriptions`** (列描述推断) → §11B.2 (含 NAME_PATTERNS 25 条规则 / 值模式 10 条 / TYPE_HINTS / LLM 兜底 Prompt / 人工优先级铁律)
+> - **`infer_lineage_descriptions`** (血缘边组件级描述) → §11C.1 (`COMPONENT_TEMPLATES` 完整字典) + §11C.2 (6 阶段管道样例) + §11C.3 (Skill 核心代码)
+> - **`infer_column_lineage`** (列级血缘推断) → §11A.6 (含 3 层推断策略 + 幂等保证 + job_id 区分)
+> - **`lineage_to_column`** (表级 → 列级 自动展开) → §11A.6 (与 `infer_column_lineage` 共享 §11A.6 表)
+> - **整体 API 速查** → §11G
+> - **5 大原则关系** → §11H
+> - **已落地状态** → §11I
+>
+> 留在本文 (`skills-design.md`) 的, 仅是 §11 表格中的**一行摘要 + skill 名称归类** (保持 Skill 清单完整可检索)。
+
+#### Quick Reference (迁移前原内容摘要, 详见 ai-driven-design.md)
+
+> 下面 4 个 Skill 的详细设计已迁移, 此处只留"一句话签名" + 跳转链接, 方便代码 grep。
+
+| Skill | 一句话签名 | 统一文档位置 |
+| --- | --- | --- |
+| `infer_column_descriptions` | 规则 (列名/类型/值模式/PII, 70%) + LLM 兜底 (cheap, 30%) 推断列业务描述 | §11B.2 |
+| `infer_lineage_descriptions` | 组件模板 (component + transform_type, 80%) + LLM (20%) 生成 `table_lineage.description` + `column_lineage.description` | §11C.1, §11C.3 |
+| `infer_column_lineage` | sqlglot 解析 SQL (100%) + 同名映射 (80%) + LLM 兜底 → 写 `column_lineage` | §11A.2, §11A.6 |
+| `lineage_to_column` | 表级血缘边 → 同名/命名约定自动展开为列级血缘 (ON CONFLICT DO NOTHING 幂等) | §11A.6 |
 
 ---
 

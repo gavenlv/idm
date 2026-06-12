@@ -14,7 +14,7 @@ from idm_api import __version__
 from idm_api.config import get_settings
 from idm_api.db import dispose_engine, get_engine
 from idm_api.routers import (
-    assets, chatbi, feedback, glossary, health, idm_self_mcp, impact, owners, quality, scan, search, services, skills, suggestions, tags, use_case_trigger, use_cases,
+    assets, chatbi, column_lineage, descriptions, feedback, glossary, health, idm_self_mcp, impact, openlineage, owners, quality, scan, search, services, skills, suggestions, tags, use_case_trigger, use_cases,
 )
 from idm_api.skills import mcp as mcp_sidecar  # 注册 builtin skills via import side-effect
 
@@ -37,6 +37,13 @@ import idm_api.skills.builtin.lineage_reasoner  # noqa: F401
 import idm_api.skills.builtin.run_quality_check  # noqa: F401
 import idm_api.skills.builtin.compose_insight  # noqa: F401
 import idm_api.skills.builtin.profiler  # noqa: F401
+# === M2.x Semantic Enrichment ===
+import idm_api.skills.builtin.infer_column_descriptions  # noqa: F401
+import idm_api.skills.builtin.infer_column_lineage  # noqa: F401
+import idm_api.skills.builtin.lineage_to_column  # noqa: F401
+import idm_api.skills.builtin.infer_lineage_descriptions  # noqa: F401
+# === M2.5 OpenLineage Alignment ===
+import idm_api.skills.builtin.emit_openlineage_event  # noqa: F401
 
 settings = get_settings()
 
@@ -94,6 +101,14 @@ app.include_router(quality.router, prefix="/api/v1/quality", tags=["quality"])
 app.include_router(chatbi.router, prefix="/api/v1/chatbi", tags=["chatbi"])
 app.include_router(idm_self_mcp.router, prefix="/api/v1/mcp/idm-self", tags=["mcp-idm-self"])
 app.include_router(feedback.router)  # 内部已含 /api/v1/feedback prefix
+
+# === M2.x Semantic Enrichment ===
+app.include_router(column_lineage.router, prefix="/api/v1", tags=["lineage-column"])
+app.include_router(descriptions.description_router, prefix="/api/v1", tags=["descriptions"])
+app.include_router(descriptions.asset_description_router, prefix="/api/v1", tags=["descriptions"])
+app.include_router(descriptions.lineage_description_router, prefix="/api/v1", tags=["descriptions"])
+# === M2.5 OpenLineage Alignment ===
+app.include_router(openlineage.router, prefix="/api/v1", tags=["lineage-openlineage"])
 
 
 __all__ = ["app", "__version__"]

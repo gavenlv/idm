@@ -1,4 +1,4 @@
-﻿# IDM — 迭代路线图与里程碑
+# IDM — 迭代路线图与里程碑
 
 > 从 0 到 1，5 个季度交付一个**生产可用**的 AI 驱动数据管理平台
 > 节奏：**季度 1 个大版本**，**月度小迭代**
@@ -97,6 +97,39 @@ gantt
 - 文档覆盖率 ≥ 70%
 - AI 建议采纳率 ≥ 40%
 - LLM P95 < 4s
+
+### 2.2.1 M2.x (M2 内插 — Semantic Enrichment) — **语义增强层**
+
+> 目标：**让每张表 / 每列 / 每条血缘边都有自然语言描述, LLM 零样本可用**。
+> 详见 [architecture.md §5.7](./architecture.md#57-语义增强子系统-m2x-新增--让数据资产会说话) · [data-model.md §7](./data-model.md#7-语义增强子层-m2x-新增--semantic-enrichment) · [data-pipeline-lineage.md §4.3](./data-pipeline-lineage.md#43-m2x-新增-列级血缘--语义描述-semantic-enrichment)
+
+| 子能力 | 交付 | 优先级 | 状态 |
+| --- | --- | --- | --- |
+| **表描述增强** | `infer_table_description` 增强: 适配 gcs_object / mex_io / flink_table 资产类型 | P0 | 已存在 skill, 待增强 |
+| **列描述推断** (新) | `infer_column_descriptions` skill + 列名/值规则表 (70% 零 LLM) | P0 | 待实现 |
+| **列级血缘** (新) | `column_lineage` 表 + `infer_column_lineage` skill (sqlglot 静态 + LLM 兜底) | P0 | 待实现 |
+| **组件级血缘描述** (新) | `infer_lineage_descriptions` skill (组件模板 80% + LLM 20%) | P0 | 待实现 |
+| **`lineage_to_column`** (新) | 表级血缘自动展开为列级 (同名列 + 命名约定) | P1 | 待实现 |
+| **AI in the Loop** | description 双写 `ai_suggestion` + 人工 confirm 流 | P0 | 已存在模式, 扩展到列/血缘 |
+| **资产详情页 (UI)** | description + source + confidence + rationale + 编辑按钮 | P0 | 待 M2.x 开发 |
+| **列详情页 (UI 新)** | 描述 + 样本值 + PII 分类 + 列级血缘 (上+下游) | P1 | 待 M2.x 开发 |
+| **血缘图 (UI 增强)** | 边的中间显示组件级 description + transform_expression hover | P1 | 待 M2.x 开发 |
+| **ChatBI 集成** | LLM 读 description 自动生成 SQL, 减少业务解释成本 | P2 | 待 M4 集成 |
+
+**核心指标**：
+- 描述覆盖率 ≥ 80% (表/列/血缘边)
+- 抽样准确率 ≥ 75% (人工 review 通过)
+- LLM 调用次数 ≤ 1 / 资产 (cheap profile)
+- PII 安全 100% (description 不含真实值)
+
+**Sprint 计划** (M2.x 4 个 Sprint, 每 Sprint 2 周):
+
+| Sprint | 任务 |
+| --- | --- |
+| **S1** | 数据模型: `column_lineage` 表 + `description_*` 字段 (Alembic 迁移) |
+| **S2** | `infer_column_descriptions` skill (70% 规则 + 30% LLM) |
+| **S3** | `infer_column_lineage` skill (sqlglot + LLM 兜底) + `lineage_to_column` |
+| **S4** | `infer_lineage_descriptions` skill (组件模板) + UI 集成 |
 
 ### 2.3 M3 (Q1 2027) — **Knowledge Graph**
 

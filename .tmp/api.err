@@ -1,29 +1,4 @@
-INFO:     Started server process [30456]
+INFO:     Started server process [15736]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8080 (Press CTRL+C to quit)
-anomaly detector volume_drift failed on clickhouse-prod.shop.default.orders_temp_test: object NoneType can't be used in 'await' expression
-anomaly detector null_spike failed on clickhouse-prod.shop.default.orders_temp_test: object NoneType can't be used in 'await' expression
-anomaly detector volume_drift failed on clickhouse-prod.shop.default.order_items: object NoneType can't be used in 'await' expression
-anomaly detector null_spike failed on clickhouse-prod.shop.default.order_items: object NoneType can't be used in 'await' expression
-anomaly detector volume_drift failed on clickhouse-prod.shop.default.orders_daily: object NoneType can't be used in 'await' expression
-anomaly detector null_spike failed on clickhouse-prod.shop.default.orders_daily: object NoneType can't be used in 'await' expression
-anomaly detector volume_drift failed on clickhouse-prod.shop.default.users: object NoneType can't be used in 'await' expression
-anomaly detector null_spike failed on clickhouse-prod.shop.default.users: object NoneType can't be used in 'await' expression
-anomaly detector volume_drift failed on clickhouse-prod.shop.default.orders_temp_test: object NoneType can't be used in 'await' expression
-anomaly detector null_spike failed on clickhouse-prod.shop.default.orders_temp_test: object NoneType can't be used in 'await' expression
-anomaly detector volume_drift failed on clickhouse-prod.shop.default.order_items: object NoneType can't be used in 'await' expression
-anomaly detector null_spike failed on clickhouse-prod.shop.default.order_items: object NoneType can't be used in 'await' expression
-anomaly detector volume_drift failed on clickhouse-prod.shop.default.orders_daily: object NoneType can't be used in 'await' expression
-anomaly detector null_spike failed on clickhouse-prod.shop.default.orders_daily: object NoneType can't be used in 'await' expression
-anomaly detector volume_drift failed on clickhouse-prod.shop.default.users: object NoneType can't be used in 'await' expression
-anomaly detector null_spike failed on clickhouse-prod.shop.default.users: object NoneType can't be used in 'await' expression
-anomaly detector volume_drift failed on clickhouse-prod.shop.default.orders_temp_test: object NoneType can't be used in 'await' expression
-anomaly detector null_spike failed on clickhouse-prod.shop.default.orders_temp_test: object NoneType can't be used in 'await' expression
-anomaly detector pii_escalation failed on clickhouse-prod.shop.default.orders_temp_test: object NoneType can't be used in 'await' expression
-anomaly detector volume_drift failed on clickhouse-prod.shop.default.order_items: object NoneType can't be used in 'await' expression
-anomaly detector null_spike failed on clickhouse-prod.shop.default.order_items: object NoneType can't be used in 'await' expression
-anomaly detector pii_escalation failed on clickhouse-prod.shop.default.order_items: object NoneType can't be used in 'await' expression
-anomaly detector volume_drift failed on clickhouse-prod.shop.default.orders_daily: object NoneType can't be used in 'await' expression
-anomaly detector null_spike failed on clickhouse-prod.shop.default.orders_daily: object NoneType can't be used in 'await' expression
-anomaly detector pii_escalation failed on clickhouse-prod.shop.default.orders_daily: object NoneType can't be used in 'await' expression

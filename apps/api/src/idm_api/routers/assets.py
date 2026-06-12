@@ -248,6 +248,13 @@ async def asset_lineage(
             source=e.source,
             upstream_fqn=fqn_map.get(e.upstream_id),
             downstream_fqn=fqn_map.get(e.downstream_id),
+            # === M2.x Semantic Enrichment ===
+            transform_subtype=e.transform_subtype,
+            transform_expression=e.transform_expression,
+            component=e.component,
+            description=e.description,
+            description_source=e.description_source,
+            pipeline_stage=e.pipeline_stage,
         )
 
     up_reads = [to_read(e) for e in up_edges]

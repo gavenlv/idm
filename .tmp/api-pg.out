@@ -1,27 +1,29 @@
-INFO:     Started server process [19872]
+INFO:     Started server process [22356]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
-INFO:     127.0.0.1:19031 - "GET /health/ready HTTP/1.1" 200 OK
-INFO:     127.0.0.1:19034 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:19037 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:19044 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:27539 - "GET /api/health/ready HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:45398 - "GET /api/health/ready HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:7085 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:7086 - "GET /api/v1/suggestions?status=pending&limit=10 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:3867 - "GET /api/v1/owners?limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:3086 - "GET /api/health/ready HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:32410 - "GET /api/health/ready HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:54648 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58122 - "GET /api/v1/suggestions?status=pending&limit=10 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36885 - "GET /api/health/ready HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:36884 - "GET /api/v1/owners?limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:36887 - "GET /api/health/ready HTTP/1.1" 404 Not Found
-INFO:     127.0.0.1:36889 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10552 - "GET /api/v1/assets/6857be6b-ded0-4543-90ed-797f07dfaffc/pii-summary HTTP/1.1" 200 OK
-INFO:     127.0.0.1:10551 - "GET /api/v1/assets/6857be6b-ded0-4543-90ed-797f07dfaffc/columns HTTP/1.1" 200 OK
-INFO:     127.0.0.1:13400 - "GET /api/v1/assets/6857be6b-ded0-4543-90ed-797f07dfaffc/lineage?depth=2 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:46530 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:13404 - "POST /api/v1/scan/asset HTTP/1.1" 200 OK
-INFO:     127.0.0.1:47397 - "GET /api/v1/assets/946ff640-fad3-4d0e-b5ce-52317e234043/lineage?depth=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42836 - "GET /api/v1/health HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:42840 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42842 - "GET / HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:28667 - "GET /api/v1/assets?limit=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:28669 - "PATCH /api/v1/assets/6857be6b-ded0-4543-90ed-797f07dfaffc/description HTTP/1.1" 200 OK
+INFO:     127.0.0.1:28674 - "GET /api/v1/lineage/column/table/6857be6b-ded0-4543-90ed-797f07dfaffc HTTP/1.1" 200 OK
+INFO:     127.0.0.1:28679 - "GET /api/v1/lineage/table/6857be6b-ded0-4543-90ed-797f07dfaffc HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:28681 - "GET /api/v1/lineage?limit=3 HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:28683 - "GET /api/v1/assets/6857be6b-ded0-4543-90ed-797f07dfaffc/lineage HTTP/1.1" 200 OK
+INFO:     127.0.0.1:28685 - "GET /api/v1/skills HTTP/1.1" 200 OK
+INFO:     127.0.0.1:28687 - "POST /api/v1/skills/infer_column_descriptions/execute HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:40832 - "GET /api/v1/suggestions?suggestion_type=insight&limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40833 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:4718 - "GET /api/v1/assets?limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:4720 - "GET /api/v1/assets/b2b5ce82-f59f-4a51-ae91-5f1d7cd6c32f/lineage?depth=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36393 - "GET /api/v1/assets/6857be6b-ded0-4543-90ed-797f07dfaffc/lineage?depth=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36395 - "GET /api/v1/skills/infer_column_descriptions HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36397 - "GET /api/v1/assets/c7b70628-df6e-4a4b-a1d3-bc570d4d0223/lineage?depth=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51379 - "GET /api/v1/assets/d8bedac4-cb9d-498e-a45e-5b08a6fe2efc/lineage?depth=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:22893 - "GET /api/v1/assets/1213cee1-3ca6-42c8-9732-87efe7f95ff9/lineage?depth=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:19940 - "GET /api/v1/assets/83a51b7b-93e8-48d1-87d9-172b0fe1fc06/lineage?depth=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:21592 - "POST /api/v1/skills/run HTTP/1.1" 200 OK
+INFO:     127.0.0.1:21597 - "GET /api/v1/skills/extract_sql_lineage HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:21602 - "GET /api/v1/assets?limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:21604 - "POST /api/v1/skills/run HTTP/1.1" 200 OK

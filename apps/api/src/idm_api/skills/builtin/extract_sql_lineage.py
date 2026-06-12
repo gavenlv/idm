@@ -36,17 +36,22 @@ from idm_kg.models.table_lineage import TableLineage
 logger = logging.getLogger(__name__)
 
 
+def _tostr(v: Any) -> str:
+    """将 sqlglot 节点 / str 转为 str. Identifier 等节点用 .name 取得真实名."""
+    if v is None:
+        return ""
+    if hasattr(v, "name"):
+        return str(v.name)
+    return str(v)
+
+
 def _try_sqlglot(sql: str) -> list[dict[str, Any]] | None:
     """尝试用 sqlglot 提取表血缘; 失败返回 None 走 fallback."""
     try:
         import sqlglot  # type: ignore
     except ImportError:
         return None
-    try:
-        import sqlglot.optimizer.qualify as qualify  # type: ignore
-        from sqlglot.optimizer.lineage import lineage  # type: ignore
-    except Exception:  # noqa: BLE001
-        return None
+    # 注: 27.x sqlglot 没有 sqlglot.optimizer.lineage 子模块, 我们用基础 parse + Table 提取.
     try:
         statements = sqlglot.parse(sql, read="duckdb")
         out: list[dict[str, Any]] = []
@@ -55,15 +60,19 @@ def _try_sqlglot(sql: str) -> list[dict[str, Any]] | None:
                 continue
             # 1) 找目标 (INSERT / CREATE / MERGE)
             target = _extract_target_table(stmt)
-            # 2) 找所有引用的源表
+            # 2) 找所有引用的源表 (排除掉 target 本身)
             refs: set[str] = set()
             for tbl in stmt.find_all(sqlglot.exp.Table):
-                name = tbl.name
-                db = tbl.args.get("db") or ""
-                sch = tbl.args.get("catalog") or ""
-                if name:
-                    qual = ".".join([p for p in (sch, db, name) if p])
-                    refs.add(qual)
+                sch = _tostr(tbl.args.get("catalog"))
+                db = _tostr(tbl.args.get("db"))
+                name = _tostr(tbl.name)
+                if not name:
+                    continue
+                qual = ".".join([p for p in (sch, db, name) if p])
+                if target and qual == target:
+                    # target 自己不计入 upstream
+                    continue
+                refs.add(qual)
             for r in sorted(refs):
                 out.append({"upstream_table": r, "downstream_table": target, "via": "sqlglot"})
         return out if out else []
@@ -82,13 +91,19 @@ def _extract_target_table(stmt) -> str | None:  # type: ignore[no-untyped-def]
             if isinstance(t, exp.Schema):
                 t = t.this
             if isinstance(t, exp.Table):
-                return ".".join(p for p in (t.args.get("catalog"), t.args.get("db"), t.name) if p)
+                sch = _tostr(t.args.get("catalog"))
+                db = _tostr(t.args.get("db"))
+                name = _tostr(t.name)
+                return ".".join(p for p in (sch, db, name) if p)
         # CREATE TABLE
         ct = stmt.find(exp.Create)
         if ct:
             t = ct.this
             if isinstance(t, exp.Table):
-                return ".".join(p for p in (t.args.get("catalog"), t.args.get("db"), t.name) if p)
+                sch = _tostr(t.args.get("catalog"))
+                db = _tostr(t.args.get("db"))
+                name = _tostr(t.name)
+                return ".".join(p for p in (sch, db, name) if p)
     except Exception:  # noqa: BLE001
         return None
     return None

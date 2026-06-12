@@ -46,6 +46,9 @@ class TableAsset(Base, UUIDMixin, TimestampMixin):
     description: Mapped[str | None] = mapped_column(String(4096), nullable=True)
     description_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # manual / ai_inferred / imported
+    description_rationale: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    # LLM 推理过程 / 用户备注
+    described_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_profiled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # 统计
@@ -68,6 +71,11 @@ class TableAsset(Base, UUIDMixin, TimestampMixin):
     external_ref: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     # 6 阶段管道标号: 1|2|3|4|5|6 (强约束; 用于 6 阶段真实管道用例)
     pipeline_stage: Mapped[int | None] = mapped_column(SmallInteger, nullable=True, index=True)
+
+    # === OpenLineage 对齐 (M2.5): ol_namespace ===
+    # 对齐 OpenLineage Dataset.namespace (e.g. "clickhouse://shop" / "gcs://company-raw")
+    # 默认 = service.database 拼接, 也可手动指定 (如跨 service 聚合场景)
+    ol_namespace: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
 
     # 扩展属性 (PII / 业务标签 / 备注)
     extra: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)

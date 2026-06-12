@@ -63,6 +63,10 @@ class TableAssetRead(TableAssetBase):
     # === Data Quality (M4) ===
     health_score: float | None = None
     health_score_updated_at: datetime | None = None
+    # === M2.x Semantic Enrichment ===
+    description_source: str | None = None
+    description_rationale: str | None = None
+    described_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -125,6 +129,13 @@ class LineageEdgeRead(BaseModel):
     source: str
     upstream_fqn: str | None = None
     downstream_fqn: str | None = None
+    # === M2.x 新增 ===
+    transform_subtype: str | None = None
+    transform_expression: str | None = None
+    component: str | None = None
+    description: str | None = None
+    description_source: str | None = None
+    pipeline_stage: int | None = None
 
 
 class LineageGraphResponse(BaseModel):
@@ -136,6 +147,173 @@ class LineageGraphResponse(BaseModel):
     downstream: list[LineageEdgeRead]
     nodes: list[dict[str, Any]]  # [{id, fqn, asset_type, tier}, ...] 去重
     edges: list[LineageEdgeRead]
+
+
+# === ColumnLineage (M2.x) ===
+class ColumnLineageEdgeRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    upstream_table_id: UUID
+    downstream_table_id: UUID
+    upstream_column_id: UUID
+    downstream_column_id: UUID
+    transform_type: str
+    transform_expression: str | None = None
+    job_id: str | None = None
+    component: str
+    description: str | None = None
+    description_source: str | None = None
+    confidence: float
+    source: str
+    pipeline_stage: int | None = None
+    # 展开字段 (非存储)
+    upstream_table_fqn: str | None = None
+    downstream_table_fqn: str | None = None
+    upstream_column_name: str | None = None
+    downstream_column_name: str | None = None
+    upstream_column_type: str | None = None
+    downstream_column_type: str | None = None
+
+
+class ColumnLineageResponse(BaseModel):
+    """列级血缘响应: 以某列 (或某表) 为中心."""
+
+    center_table_id: UUID | None = None
+    center_column_id: UUID | None = None
+    upstream: list[ColumnLineageEdgeRead]
+    downstream: list[ColumnLineageEdgeRead]
+    total: int
+
+
+class ColumnLineageStatsResponse(BaseModel):
+    n_edges: int
+    n_transform_types: dict[str, int]
+    n_components: dict[str, int]
+    coverage: dict[str, int]  # {table_with_col_lineage: count}
+
+
+# === Column Lineage Coverage (M2.5+) ===
+class ColumnCoverageEntry(BaseModel):
+    """单列的列血缘覆盖状态."""
+
+    column_id: UUID
+    column_name: str
+    data_type: str
+    has_upstream: bool
+    has_downstream: bool
+    n_upstream_edges: int
+    n_downstream_edges: int
+
+
+class TableColumnCoverage(BaseModel):
+    """单表的列血缘覆盖统计."""
+
+    table_id: UUID
+    table_fqn: str
+    asset_type: str
+    tier: str
+    n_columns: int
+    n_columns_with_lineage: int
+    coverage_pct: float  # 0-100
+    has_table_lineage: bool
+    n_table_lineage_edges: int
+    columns: list[ColumnCoverageEntry]
+
+
+class ColumnCoverageResponse(BaseModel):
+    """全表列血缘覆盖响应 (OpenLineage-style coverage matrix)."""
+
+    total_tables: int
+    total_columns: int
+    total_columns_with_lineage: int
+    overall_coverage_pct: float
+    tables: list[TableColumnCoverage]
+
+
+class BulkInferRequest(BaseModel):
+    """批量列血缘推断请求."""
+
+    table_ids: list[UUID] | None = None
+    # None = all tables; or specific list
+    include_table_lineage_inference: bool = True
+    # If True, run lineage_reasoner first (for tables without table_lineage)
+    include_column_lineage_inference: bool = True
+    # If True, run infer_column_lineage for sql-driven cases
+    include_lineage_to_column: bool = True
+    # If True, run lineage_to_column for table_lineage edges
+    min_confidence: float = 0.5
+    dry_run: bool = False
+
+
+class BulkInferResponse(BaseModel):
+    """批量列血缘推断响应."""
+
+    ok: bool
+    started_at: datetime
+    finished_at: datetime
+    duration_ms: int
+    tables_processed: int
+    tables_skipped: int
+    table_lineage_edges_created: int
+    column_lineage_edges_created: int
+    errors: list[str]
+    dry_run: bool
+    summary: dict[str, Any] = Field(default_factory=dict)
+
+
+# === OpenLineage (M2.5) ===
+class OpenLineageEventRead(BaseModel):
+    """OpenLineage-compatible 事件读模型.
+
+    内部存储 + 外部互操作的统一表示。
+    详见: docs/design/openlineage-alignment.md
+    """
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    event_type: str
+    event_time: datetime
+    job_namespace: str
+    job_name: str
+    run_id: str
+    inputs: list[dict[str, Any]] = Field(default_factory=list)
+    outputs: list[dict[str, Any]] = Field(default_factory=list)
+    facets: dict[str, Any] = Field(default_factory=dict)
+    producer: str | None = None
+    source_skill: str | None = None
+    pipeline_run_id: UUID | None = None
+    # 完整 OpenLineage RunEvent JSON (与 https://openlineage.io/spec/ 兼容)
+    ol_run_event: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+# === Description (M2.x) ===
+class DescriptionUpdate(BaseModel):
+    description: str = Field(..., min_length=1, max_length=2048)
+    source: Literal["manual", "ai_inferred", "imported"] = "manual"
+    rationale: str | None = Field(None, max_length=2048)
+
+
+class AssetDescriptionCoverage(BaseModel):
+    """M2.x: 描述覆盖率统计."""
+
+    tables_total: int
+    tables_with_description: int
+    tables_with_ai_description: int
+    tables_with_manual_description: int
+    columns_total: int
+    columns_with_description: int
+    columns_with_ai_description: int
+    columns_with_manual_description: int
+    table_lineage_total: int
+    table_lineage_with_description: int
+    column_lineage_total: int
+    column_lineage_with_description: int
+    table_coverage_pct: float
+    column_coverage_pct: float
+    lineage_coverage_pct: float
 
 
 # === AISuggestion ===

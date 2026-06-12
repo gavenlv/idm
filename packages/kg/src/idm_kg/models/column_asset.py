@@ -32,6 +32,9 @@ class ColumnAsset(Base, UUIDMixin, TimestampMixin):
 
     # 业务
     description: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    description_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # manual / ai_inferred / imported
+    description_rationale: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     pii_class: Mapped[str] = mapped_column(String(32), default="none", nullable=False)
     # none / email / phone / id_card / address / name / card_bin / ip / ...
     pii_confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)

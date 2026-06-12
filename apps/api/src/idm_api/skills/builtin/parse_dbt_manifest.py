@@ -68,6 +68,7 @@ def _node_to_asset_payload(node: dict[str, Any], resource_type: str) -> dict[str
             "columns": node.get("columns") or {},
             "depends_on": [],  # sources 没有 depends_on (上游在 warehouse)
             "asset_type": "table",  # source 在物理表, 不是 dbt model
+            "raw_code": None,  # sources 没有 raw_code
         }
     return {
         "database": node.get("database") or "unknown",
@@ -80,7 +81,47 @@ def _node_to_asset_payload(node: dict[str, Any], resource_type: str) -> dict[str
             if not dep.startswith("test.")  # 过滤掉 test 节点
         ],
         "asset_type": "dbt_model",
+        "raw_code": node.get("raw_code") or node.get("compiled_code") or None,
     }
+
+
+def _preprocess_dbt_sql(sql: str) -> str:
+    """把 dbt Jinja 模板 ({{ ref('x') }} / {{ source('x','y') }} / {% ... %}) 替换成纯 SQL.
+
+    - {{ ref('x') }} -> x
+    - {{ source('s', 't') }} -> t
+    - {{ this }} -> _this_ (占位)
+    - {{ var('x') }} -> 'x' (字面量)
+    - {% if/for/endif/endfor/else %} -> 删除 tags, 保留 block 内部
+    - {{ config(...) }} -> 删除
+
+    返回的 SQL 可被 sqlglot 直接 parse.
+    """
+    if not sql:
+        return sql
+    import re
+    # 1) {{ ref('x') }} / {{ ref("x") }} -> x
+    sql = re.sub(r"\{\{\s*ref\(\s*['\"]?(\w+)['\"]?\s*\)\s*\}\}", r"\1", sql)
+    # 2) {{ source('s', 't') }} -> t
+    sql = re.sub(
+        r"\{\{\s*source\(\s*['\"]?(\w+)['\"]?\s*,\s*['\"]?(\w+)['\"]?\s*\)\s*\}\}",
+        r"\2",
+        sql,
+    )
+    # 3) {{ this }} -> _this_
+    sql = re.sub(r"\{\{\s*this\s*\}\}", "_this_", sql)
+    # 4) {{ var('x') }} -> 'x'
+    sql = re.sub(r"\{\{\s*var\(\s*['\"]?(\w+)['\"]?\s*\)\s*\}\}", r"'\1'", sql)
+    # 5) {% ... %} tags (保留 block body)
+    for tag in ("endfor", "endif", "endmacro", "else"):
+        sql = re.sub(r"\{%\s*" + tag + r"\s*%\}", "", sql)
+    sql = re.sub(r"\{%\s*for\s+\w+\s+in\s+[^%]+?%\}", "", sql)  # {% for x in y %}
+    sql = re.sub(r"\{%\s*if\s+[^%]+?%\}", "", sql)  # {% if X %}
+    # 6) {{ config(...) }} 多行
+    sql = re.sub(r"\{\{\s*config\([^)]*\)\s*\}\}", "", sql, flags=re.DOTALL)
+    # 7) 清理多余空行
+    sql = re.sub(r"\n\s*\n+", "\n\n", sql)
+    return sql.strip()
 
 
 async def _ensure_service_db_schema(
@@ -298,13 +339,25 @@ async def parse_dbt_manifest(ctx: SkillContext, **inputs: Any) -> SkillResult:
                     )
                 ).scalar_one_or_none()
                 if existing_edge is not None:
+                    # 更新 sql 字段 (以新 manifest 为准, 幂等)
+                    raw_code = n_node.get("raw_code") or n_node.get("compiled_code") or None
+                    if raw_code:
+                        processed = _preprocess_dbt_sql(raw_code)
+                        if processed and processed != existing_edge.sql:
+                            existing_edge.sql = processed[:8190]
                     continue
+                # 准备 sql 字段 (M2.5+ 让 infer_column_lineage 能 sqlglot 解析)
+                raw_code = n_node.get("raw_code") or n_node.get("compiled_code") or None
+                processed_sql = _preprocess_dbt_sql(raw_code)[:8190] if raw_code else None
                 ctx.db.add(
                     TableLineage(
                         upstream_id=up_id,
                         downstream_id=entry["table_id"],
                         transform_type="dbt_model",
+                        transform_subtype="ref",
                         job_id=uid_full,
+                        component="dbt_model",
+                        sql=processed_sql,
                         confidence=1.0,
                         source="dbt_manifest",
                         extra={"dbt_upstream_uid": dep_uid},
