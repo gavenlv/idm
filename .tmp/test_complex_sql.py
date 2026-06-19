@@ -139,6 +139,42 @@ CASES = [
         "expect_min": 1,
         "transforms": {"function"},
     },
+    # 11. dim_users full scenario (design doc 80% coverage)
+    #    - user_id/email/phone: direct from users
+    #    - country: direct from country_seed via alias cs (alias resolution)
+    #    - first_order_at: from CTE first_orders (NOT matched to stg_orders)
+    {
+        "name": "dim_users full (JOIN + CTE, 80% coverage)",
+        "sql": (
+            "WITH first_orders AS ("
+            "  SELECT user_id, MIN(created_at) AS first_order_at "
+            "  FROM stg_orders WHERE status = 'paid' GROUP BY user_id"
+            ") "
+            "SELECT "
+            "  u.id AS user_id, "
+            "  u.email AS email, "
+            "  u.phone AS phone, "
+            "  cs.name_zh AS country, "
+            "  fo.first_order_at "
+            "FROM users u "
+            "LEFT JOIN first_orders fo ON fo.user_id = u.id "
+            "LEFT JOIN country_seed cs ON cs.code = u.country_code"
+        ),
+        "upstream": ["dbt.users", "dbt.stg_orders", "dbt.country_seed"],
+        "expect": [
+            ("dbt.users", "id", "user_id"),
+            ("dbt.users", "email", "email"),
+            ("dbt.users", "phone", "phone"),
+            ("dbt.country_seed", "name_zh", "country"),
+        ],
+        # first_order_at 来自 CTE, 不应被错误归到 stg_orders
+        "expect_no": [
+            ("dbt.stg_orders", "first_order_at"),
+            ("dbt.stg_orders", "created_at"),
+        ],
+        # 4/5 列有血缘 = 80% 覆盖 (design doc 目标)
+        "expect_min": 4,
+    },
 ]
 
 

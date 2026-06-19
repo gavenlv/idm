@@ -1263,15 +1263,15 @@ SQL: SELECT day, count(DISTINCT user_id) FROM fct_orders_risk_daily
 
 ---
 
-## 11I. 已落地状态 (Build State, 截至 M2.x — 2026-06-11 验证)
+## 11I. 已落地状态 (Build State, 截至 M2.x — 2026-06-19 验证)
 
 ### 11I.1 已落地 Skill
 
 | Skill | 实现路径 | 验证结果 |
 | --- | --- | --- |
 | `infer_column_descriptions` | 规则 (name/type/value_pattern) + LLM (deepseek-chat cheap) | 9/9 columns 推断, 6 rule + 3 LLM, min_conf=0.4 |
-| `infer_column_lineage` | sqlglot parse (基础 Table 提取) + 同名映射 fallback | 9 column edges 创建, 10 from sqlglot |
-| `lineage_to_column` | 同名映射, ON CONFLICT DO NOTHING 幂等 | 10 column edges, 4 from namematch |
+| `infer_column_lineage` | sqlglot parse (alias 还原 + CTE 跳过 + 9 种 transform_type) + 同名映射 fallback | 11/11 复杂 SQL 测试通过, dim_users 80% 覆盖 (4/5 列) |
+| `lineage_to_column` | 同名映射, ON CONFLICT DO NOTHING 幂等, SQL 存在时智能跳过 | 10 column edges, 4 from namematch |
 | `infer_lineage_descriptions` | 组件模板 (`airflow_task`/`dbt_model`/`mex_model`/`sql`/...) | 2/2 table edges 自动应用 |
 
 ### 11I.2 关键修复 (开发过程中踩过的坑)
@@ -1283,6 +1283,9 @@ SQL: SELECT day, count(DISTINCT user_id) FROM fct_orders_risk_daily
 5. **Schema 响应完整性**: `TableAssetRead` / `LineageEdgeRead` / `ColumnLineageEdgeRead` 必须包含 `description_source` / `description_rationale` / `described_at` / `component` / `transform_expression` 等字段, 否则 PATCH 后 GET 看不到。`assets.py` 中 `to_read` 需显式映射。
 6. **PII 防护**: 描述中含手机号/身份证号 → 400 拒绝 (regex 在 `descriptions.py`); 描述永远只写"类型", 不写真值。
 7. **人工优先级**: `description_source='manual'` 后, AI 推断 `infer_column_descriptions` 自动跳过 (`if c.description and c.description_source == "manual": continue`)。
+8. **Alias 节点递归解包**: `u.id AS user_id` 内部是 `Column`, 不应被 `Alias` 误判为 `passthrough`; `_infer_transform_type` 递归到 `node.this` 取真实 transform_type (M2.5+ 新增)。
+9. **复合聚合函数名兜底**: ClickHouse 风格的 `countDistinct` / `sumIf` / `groupArray` 被 sqlglot 解析为 `Anonymous`, 通过 `_AGG_FN_NAMES` frozenset 二次判定为 `aggregation` (M2.5+ 新增)。
+10. **SQL 存在时跳过同名映射**: `lineage_to_column` 在 `edge.sql` 存在时跳过, 避免在 SQL 已知情况下产生 JOIN 中间表的假阳性 (M2.5+ 新增)。
 
 ### 11I.3 端到端验证 (curl 命令 + 结果)
 
@@ -1374,6 +1377,56 @@ const { data: colLineage } = useQuery({
 // AssetsApi.columnLineage -> GET /api/v1/lineage/column/table/{tableId}/{columnName}
 ```
 
+### 11I.6 复杂 SQL 解析测试 (M2.5+ 新增)
+
+**测试套件**: [.tmp/test_complex_sql.py](file:///d:/workspace/github-ai/idm/.tmp/test_complex_sql.py) (11 个用例) + [.tmp/test_dim_e2e.py](file:///d:/workspace/github-ai/idm/.tmp/test_dim_e2e.py) (端到端 dbt SQL 预处理 + 解析)
+
+**运行命令**:
+```bash
+cd /d/workspace/github-ai/idm
+./.venv/Scripts/python.exe .tmp/test_complex_sql.py   # 11/11 passed
+./.venv/Scripts/python.exe .tmp/test_dim_e2e.py        # dim_users 80% + fct_orders_daily aggregation
+```
+
+**测试矩阵** (11 个用例, 100% 通过):
+
+| # | 用例 | 覆盖能力 | 边数 | transform_type |
+| --- | --- | --- | --- | --- |
+| 1 | basic passthrough (`u.id AS user_id`) | 直接透传 | 2 | `direct` |
+| 2 | CAST (`u.id::String AS user_id`) | 类型转换 | 1 | `cast` |
+| 3 | dbt alias (`cs → country_seed`) | 别名还原 | 1 | `direct` |
+| 4 | JOIN with ON | 多表 JOIN | 2 | `direct` |
+| 5 | aggregates (`sum` + `countDistinct`) | 聚合 + ClickHouse 复合函数 | 4 | `aggregation`/`function`/`direct` |
+| 6 | window (`ROW_NUMBER() OVER`) | 窗口函数 | 3 | `window`/`direct` |
+| 7 | CASE WHEN | 条件派生 | 2 | `derivation`/`direct` |
+| 8 | arithmetic (`price * quantity`) | 算术运算 | 3 | `arithmetic`/`direct` |
+| 9 | CTE (列不追溯到源表) | CTE 跳过 (避免假阳性) | 2 | `direct` |
+| 10 | generic function (`toDate`) | 函数调用 | 1 | `function` |
+| 11 | **dim_users full (JOIN + CTE)** | 端到端 80% 覆盖 | 4 | `direct` |
+
+**dim_users 端到端验证** (设计文档目标 80% 覆盖):
+
+| 下游列 | transform | source | 上游列 | 来源 |
+| --- | --- | --- | --- | --- |
+| `user_id` | direct | sqlglot | `raw.users.id` | `u.id AS user_id` 直接透传 |
+| `email` | direct | sqlglot | `raw.users.email` | `u.email AS email` |
+| `phone` | direct | sqlglot | `raw.users.phone` | `u.phone AS phone` |
+| `country` | direct | sqlglot | `country_seed.name_zh` | `cs.name_zh AS country` (alias 还原 cs→country_seed) |
+| `first_order_at` | (无血缘) | - | - | 来源于 CTE `first_orders`, 非真实上游表 (正确跳过) |
+
+→ **4/5 列有血缘 = 80% 覆盖率** (符合设计文档目标)
+
+**fct_orders_daily 端到端验证** (聚合 + 函数):
+
+| 下游列 | transform | 上游列 | transform_expression |
+| --- | --- | --- | --- |
+| `order_date` | function | `stg_orders.created_at` | `toDate(o.created_at)` |
+| `user_id` | direct | `stg_orders.user_id` | `o.user_id` |
+| `order_count` | aggregation | `stg_orders.id` | `countDistinct(o.id)` |
+| `gmv` | aggregation | `stg_orders.amount` | `sum(o.amount)` |
+
+→ **4/4 列有血缘 = 100% 覆盖率**, 含 `{direct, function, aggregation}` 三种 transform_type
+
 ---
 
 ## 附录 A. Agent 技术栈
@@ -1405,15 +1458,15 @@ const { data: colLineage } = useQuery({
 
 详见 [data-model.md §6.5](./data-model.md#65-列级血缘查询-m2x) · [data-model.md §7](./data-model.md#7-语义增强子层-m2x-新增--semantic-enrichment)。
 
-## 附录 D. M2.x 实现状态 (2026-06-11 验证)
+## 附录 D. M2.x 实现状态 (2026-06-19 验证)
 
 ### D.1 已落地 Skill
 
 | Skill | 实现路径 | 验证结果 |
 | --- | --- | --- |
 | `infer_column_descriptions` | 规则 (name/type/value_pattern) + LLM (deepseek-chat cheap) | 9/9 columns 推断, 6 rule + 3 LLM, min_conf=0.4 |
-| `infer_column_lineage` | sqlglot parse (基础 Table 提取) + 同名映射 fallback | 9 column edges 创建, 10 from sqlglot |
-| `lineage_to_column` | 同名映射, ON CONFLICT DO NOTHING 幂等 | 10 column edges, 4 from namematch |
+| `infer_column_lineage` | sqlglot parse (alias 还原 + CTE 跳过 + 9 种 transform_type) + 同名映射 fallback | 11/11 复杂 SQL 测试通过, dim_users 80% 覆盖 (4/5 列) |
+| `lineage_to_column` | 同名映射, ON CONFLICT DO NOTHING 幂等, SQL 存在时智能跳过 | 10 column edges, 4 from namematch |
 | `infer_lineage_descriptions` | 组件模板 (`airflow_task`/`dbt_model`/`mex_model`/`sql`/...) | 2/2 table edges 自动应用 |
 
 ### D.2 关键修复 (开发过程中)
